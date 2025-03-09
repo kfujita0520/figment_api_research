@@ -46,6 +46,30 @@ async function stake(amount: number, voteAccount: string, fundingAccount: string
   }
 };
 
+async function broadcast(transaction_payload: string) {
+  const API_URL = 'https://api.figment.io/solana/broadcast';
+  // Define request body parameters
+  const requestBody = {
+      network: "devnet",
+      transaction_payload: transaction_payload
+  };
+
+  try {
+      const response = await axios.post(API_URL, requestBody, {
+          headers: {
+              'Accept': 'application/json',
+              'Content-Type': 'application/json',
+              'x-api-key': API_KEY
+          }
+      });
+
+      console.log('Response:', response.data);
+      return response.data;
+  } catch (error) {
+      console.error('Error:', error.response ? error.response.data : error.message);
+  }
+};
+
 
 async function main() {
   try {
@@ -112,12 +136,13 @@ async function main() {
     console.log("Fully Signed Transaction (Hex):", fullySignedTransactionHex);
 
     // 6️⃣ Broadcast the signed transaction
-    const signatureString = await connection.sendRawTransaction(fullySignedTransactionBuffer, {
-      skipPreflight: false,
-      preflightCommitment: "confirmed"
-    });
-    console.log("✅ Transaction broadcasted successfully!");
-    console.log("🔗 Transaction Signature:", signatureString);
+    // const signatureString = await connection.sendRawTransaction(fullySignedTransactionBuffer, {
+    //   skipPreflight: false,
+    //   preflightCommitment: "confirmed"
+    // });
+    // console.log("✅ Transaction broadcasted successfully!");
+    // console.log("🔗 Transaction Signature:", signatureString);
+    await broadcast(fullySignedTransactionHex);
 
 
   } catch (error) {
