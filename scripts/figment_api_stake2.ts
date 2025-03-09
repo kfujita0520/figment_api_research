@@ -64,8 +64,7 @@ async function main() {
 
     // 2️⃣ Deserialize transaction
     const transaction = Transaction.from(transactionBuffer);
-    transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
-
+    //transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
     transaction.signatures.forEach((sig, index) => {
       if (sig.signature) {
         const isValid = nacl.sign.detached.verify(
@@ -73,10 +72,10 @@ async function main() {
           sig.signature,
           new PublicKey(sig.publicKey).toBytes()
         );
-        console.log(`Signature ${index + 1}: ${sig.publicKey} valid: ${isValid}`);
+        console.log(`Signature: ${sig.publicKey} valid: ${isValid}`);
       }
     });
-    console.log('Verify Signature: ', transaction.verifySignatures());
+    console.log('Verify Signature: ', transaction.verifySignatures(false));
 
     // 4️⃣ Sign the transaction (add your signature)
     transaction.partialSign(wallet); // This adds your signature to the existing ones
@@ -113,17 +112,10 @@ async function main() {
     console.log("Fully Signed Transaction (Hex):", fullySignedTransactionHex);
 
     // 6️⃣ Broadcast the signed transaction
-    // const delegateTxId = await sendAndConfirmTransaction(connection, transaction, [
-    //   wallet,
-    // ]);
-    // console.log(
-    //   `Stake account delegated to ${validatorVoteAccount}. Tx Id: ${delegateTxId}`
-    // );
     const signatureString = await connection.sendRawTransaction(fullySignedTransactionBuffer, {
       skipPreflight: false,
       preflightCommitment: "confirmed"
     });
-
     console.log("✅ Transaction broadcasted successfully!");
     console.log("🔗 Transaction Signature:", signatureString);
 
