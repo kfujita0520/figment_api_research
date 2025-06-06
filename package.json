@@ -1,9 +1,12 @@
 {
   "dependencies": {
     "@coral-xyz/borsh": "^0.30.1",
+    "@ethereumjs/common": "^10.0.0",
+    "@ethereumjs/tx": "^10.0.0",
     "@solana/web3.js": "^1.98.0",
     "axios": "^1.7.9",
     "dotenv": "^16.4.7",
+    "ethers": "^6.14.3",
     "tsc": "^2.0.4",
     "tweetnacl": "^1.0.3"
   },
