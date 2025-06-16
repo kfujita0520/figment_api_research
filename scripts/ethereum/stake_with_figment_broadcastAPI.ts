@@ -176,76 +176,6 @@ const broadcastTransaction = async (signature, unsignedTransactionSerialized) =>
   }
 }
 
-const broadcastTransaction2 = async (signedTransaction) => {
-  try {
-    const resp = await axios.post(`https://api.figment.io/ethereum/broadcast`, {
-      network: "hoodi",
-      signed_transaction: signedTransaction
-    },
-    { headers });
-    
-    return resp.data.data.transaction_hash
-  } catch (e) {
-    console.error("Broadcast Transaction Error:")
-    console.error(JSON.stringify(e.response?.data || e.message, null, 2));
-    
-    // /console.log(e.response.data.error.details);
-  }
-}
-
-/**
- * Broadcast an Ethereum transaction using ethers.js with an RPC provider
- * @param signature The signature generated from the unsigned transaction hash
- * @param unsignedTransactionSerialized The unsigned transaction data
- * @returns Transaction hash
- */
-const broadcastWithEthers = async (signature: string, unsignedTransactionSerialized: string): Promise<string> => {
-  try {
-    // Convert signature to r, s, v components
-    const sig = ethers.Signature.from(signature);
-    console.log("Signature components:", sig);
-    
-    // Parse the transaction data
-    const tx = ethers.Transaction.from(unsignedTransactionSerialized);
-    
-    
-    // Create signed transaction by adding the signature components
-    const unsignedTx = tx.unsignedSerialized;
-    console.log("Signed transaction:", unsignedTx);
-
-    const wallet = new ethers.Wallet(privateKey, provider);
-    const txRequest = {
-      to: tx.to,
-      from: wallet.address,
-      nonce: tx.nonce,
-      gasLimit: tx.gasLimit,
-      maxPriorityFeePerGas: tx.maxPriorityFeePerGas,
-      maxFeePerGas: tx.maxFeePerGas,
-      data: tx.data,
-      value: tx.value,
-      chainId: tx.chainId,
-      type: tx.type || 0
-    };
-    console.log("Transaction request:", txRequest);
-
-    // Sign the transaction (creates a new transaction with your signature)
-    const signedTx = await wallet.signTransaction(txRequest);
-    console.log("Created signed transaction:", signedTx);
-    
-    // Send the raw transaction
-    const txResponse = await provider.broadcastTransaction(signedTx);
-    console.log("Transaction sent:", txResponse.hash);
-    
-    // Wait for transaction to be mined (optional)
-    const receipt = await txResponse.wait();
-    console.log("Transaction mined in block:", receipt?.blockNumber);
-    
-    return txResponse.hash;
-  } catch (e) {
-    console.error("Error broadcasting transaction:", e);
-    throw e;
-  }
-};
 
 async function main() {
   // Send a POST request to the Figment API to create a new validator
@@ -271,26 +201,6 @@ async function main() {
   const isValidSignature = await verifyTransactionAndSignature(unsignedTransactionSerialized, signature, withdrawalAddress);
   console.log("Is the signature valid?", isValidSignature);
   const txHash = await broadcastTransaction(signature, unsignedTransactionSerialized)
-
-
-
-  // borodcast with signedTransactioon parameter
-  const wallet = new ethers.Wallet(privateKey, provider);
-  const unsignedTransaction = ethers.Transaction.from(unsignedTransactionSerialized);
-  const signedTransaction = await wallet.signTransaction(unsignedTransaction);
-  //const txHash = await broadcastTransaction2(signedTransaction)
-
-
-  // broadcast with ethersjs
-  const unsignedTransactionHashed =
-    responseJson?.meta?.staking_transaction?.unsigned_transaction_hashed;
-  if (!unsignedTransactionHashed) {
-    throw new Error("unsigned_transaction_hashed not found in the response");
-  }
-  console.log(`Unsigned transaction hash: ${unsignedTransactionHashed}`);
-  signature = await wallet.signMessage(unsignedTransactionHashed);
-  console.log(`Signature: ${signature}`);
-  //const txHash = await broadcastWithEthers(signature, unsignedTransactionSerialized)
 
 
   console.log(`broadcasted transaction. explorer link: https://hoodi.etherscan.io/tx/${txHash}`)
