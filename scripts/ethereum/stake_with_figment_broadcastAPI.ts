@@ -7,10 +7,6 @@ config();
 const privateKey = process.env.PRIVATE_KEY; // Replace with your actual private key
 const apiKey = process.env.API_KEY;
 
-// Public RPC node
-const rpcUrl = process.env.RPC_URL; // Replace with your actual RPC URL
-const provider = new ethers.JsonRpcProvider(rpcUrl);
-
 // API request details for the Figment API
 const url = "https://api.figment.io/ethereum/validators";
 const headers = {
@@ -24,8 +20,6 @@ const data = {
   validators_count: 1,
   amount: "32",
   withdrawal_address: withdrawalAddress,
-  funding_address: withdrawalAddress,
-  fee_recipient_address: withdrawalAddress,
   region: "ca-central-1",
   credentials_prefix: '0x02',
 };
@@ -196,11 +190,15 @@ async function main() {
   }
   console.log(`Unsigned transaction serialized: ${unsignedTransactionSerialized}`);
 
+  console.log(JSON.stringify(responseJson, null, 2));
+
   let signature = await generateSignatureFromUnsignedTx(unsignedTransactionSerialized, privateKey);
 
   const isValidSignature = await verifyTransactionAndSignature(unsignedTransactionSerialized, signature, withdrawalAddress);
   console.log("Is the signature valid?", isValidSignature);
-  const txHash = await broadcastTransaction(signature, unsignedTransactionSerialized)
+  
+  let txHash = "";
+  //txHash = await broadcastTransaction(signature, unsignedTransactionSerialized)
 
 
   console.log(`broadcasted transaction. explorer link: https://hoodi.etherscan.io/tx/${txHash}`)
