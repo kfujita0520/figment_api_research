@@ -121,11 +121,7 @@ async function main() {
 
   console.log(JSON.stringify(responseJson, null, 2));
 
-  //let signature = await generateSignatureFromUnsignedTx(unsignedTransactionSerialized, privateKey);
   let signature = await generateSignatureFromUnsignedTxHash(unsignedTransactionHash, privateKey);
-
-  // const isValidSignature = await verifyTransactionAndSignature(unsignedTransactionSerialized, signature, withdrawalAddress);
-  // console.log("Is the signature valid?", isValidSignature);
   
   let txHash = "";
   txHash = await broadcastTransaction(signature, unsignedTransactionSerialized)
