@@ -4,18 +4,10 @@ config();
 
 // EIP-7002 Configuration Constants
 const WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS = "0x00000961Ef480Eb55e80D19ad83579A64c007002";
-const WITHDRAWAL_REQUEST_TYPE = "0x01";
-const SYSTEM_ADDRESS = "0xfffffffffffffffffffffffffffffffffffffffe";
-const MAX_WITHDRAWAL_REQUESTS_PER_BLOCK = 16;
-const TARGET_WITHDRAWAL_REQUESTS_PER_BLOCK = 2;
-const MIN_WITHDRAWAL_REQUEST_FEE = 1n;
-const WITHDRAWAL_REQUEST_FEE_UPDATE_FRACTION = 17n;
-const EXCESS_INHIBITOR = 2n ** 256n - 1n;
 
 // Environment variables
 const privateKey = process.env.PRIVATE_KEY;
 const rpcUrl = process.env.RPC_URL;
-const apiKey = process.env.API_KEY;
 
 if (!privateKey || !rpcUrl) {
   throw new Error("Missing required environment variables: PRIVATE_KEY, RPC_URL");
@@ -24,33 +16,7 @@ if (!privateKey || !rpcUrl) {
 const provider = new ethers.JsonRpcProvider(rpcUrl);
 const wallet = new ethers.Wallet(privateKey, provider);
 
-// ABI for the withdrawal request contract
-const WITHDRAWAL_REQUEST_ABI = [
-  // Function to add withdrawal request (56 bytes input: 48 bytes pubkey + 8 bytes amount)
-  "function addWithdrawalRequest(bytes calldata data) external payable",
-  
-  // Function to get current fee (0 bytes input)
-  "function getFee() external view returns (uint256)",
-  
-  // Function to get withdrawal request count for current block
-  "function getWithdrawalRequestCount() external view returns (uint256)",
-  
-  // Function to get queue head
-  "function getQueueHead() external view returns (uint256)",
-  
-  // Function to get queue tail
-  "function getQueueTail() external view returns (uint256)",
-  
-  // Events
-  "event WithdrawalRequestAdded(address indexed source, bytes32 indexed validatorPubkey, uint64 amount, uint256 fee)",
-];
 
-// Contract interface
-const withdrawalContract = new ethers.Contract(
-  WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS,
-  WITHDRAWAL_REQUEST_ABI,
-  wallet
-);
 
 /**
  * Get the current fee required to add a withdrawal request
@@ -206,41 +172,7 @@ async function getWithdrawalStats(): Promise<void> {
   }
 }
 
-/**
- * Calculate the fee based on EIP-7002 formula
- * @param excess The excess withdrawal requests
- * @returns Calculated fee
- */
-function calculateFee(excess: bigint): bigint {
-  // Formula: fee = MIN_WITHDRAWAL_REQUEST_FEE * e^(excess / WITHDRAWAL_REQUEST_FEE_UPDATE_FRACTION)
-  // For simplicity, we'll use a linear approximation
-  const feeMultiplier = excess / WITHDRAWAL_REQUEST_FEE_UPDATE_FRACTION;
-  return MIN_WITHDRAWAL_REQUEST_FEE * (1n + feeMultiplier);
-}
 
-/**
- * Check if the caller address matches the withdrawal credential
- * @param validatorPubkey The validator's public key
- * @param callerAddress The address calling the contract
- * @returns Promise<boolean>
- */
-async function verifyWithdrawalCredential(
-  validatorPubkey: string,
-  callerAddress: string
-): Promise<boolean> {
-  // This would require EIP-4788 (BEACON_ROOT opcode) to verify against beacon state
-  // For now, we'll assume the caller is authorized
-  // In a real implementation, you'd need to:
-  // 1. Get the beacon state root
-  // 2. Verify the validator's withdrawal credentials
-  // 3. Check if the caller address matches the 0x01 withdrawal credential
-  
-  console.log(`Verifying withdrawal credential for validator ${validatorPubkey}`);
-  console.log(`Caller address: ${callerAddress}`);
-  console.log("Note: Full verification requires EIP-4788 implementation");
-  
-  return true; // Placeholder
-}
 
 /**
  * Main function to demonstrate withdrawal request
@@ -257,11 +189,12 @@ async function main() {
     
     // Example validator public key (replace with actual validator pubkey)
     let exampleValidatorPubkey = "0x" + "1".repeat(96); // 48 bytes of 1s
-    exampleValidatorPubkey = "0x85a34f02c87063d9d3747843c190783857d9c6a6a1ff69f2c8ffdc9ea7e38e5a5ff259e30daf27ba46d1442970281922";
+    exampleValidatorPubkey = "0x987181a942cb05c376b35c3877ea63aaeda34335b4912d6ef78e905c891c12d1c5a70b12db47bbf8c98e280281f02b46";
     
     // Example withdrawal amount (0.1 ETH)
-    // const withdrawalAmount = ethers.parseEther("32");
-    const withdrawalAmount = 32n;
+    const withdrawalAmount = ethers.parseUnits("0.11", 9);;
+    console.log(`Withdrawal amount: ${withdrawalAmount}`);
+    // const withdrawalAmount = 32n;
     
     // Set a fee limit (1 ETH)
     const feeLimit = ethers.parseEther("1.0");
@@ -269,6 +202,8 @@ async function main() {
     console.log("\n=== Example Withdrawal Request ===");
     console.log("Note: This is a demonstration with example data");
     console.log("Replace with actual validator public key and amount");
+
+    // TODO: Check if the caller address matches the withdrawal credential in production
     
     // Uncomment the following lines to actually submit a withdrawal request
     const txHash = await addWithdrawalRequest(exampleValidatorPubkey, withdrawalAmount, feeLimit);
@@ -282,7 +217,6 @@ async function main() {
     console.log("5. Run the script");
     
     console.log("\n=== Important Notes ===");
-    console.log("- The caller address must match the 0x01 withdrawal credential");
     console.log("- Fees are dynamic and based on network usage");
     console.log("- Withdrawal requests are processed by the consensus layer");
     console.log("- This is for partial withdrawals; full exits require different process");
@@ -292,16 +226,6 @@ async function main() {
   }
 }
 
-// Export functions for use in other modules
-export {
-  addWithdrawalRequest,
-  getCurrentFee,
-  getWithdrawalStats,
-  verifyWithdrawalCredential,
-  calculateFee,
-  WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS,
-  WITHDRAWAL_REQUEST_TYPE
-};
 
 // Run main function if this file is executed directly
 if (require.main === module) {
