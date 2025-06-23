@@ -76,7 +76,7 @@ async function addWithdrawalRequest(
     
     // Check fee limit if provided
     if (feeLimit && currentFee > feeLimit) {
-      throw new Error(`Current fee (${ethers.formatEther(currentFee)} ETH) exceeds limit (${ethers.formatEther(feeLimit)} ETH)`);
+      throw new Error(`Current fee (${ethers.formatUnits(currentFee, 9)} ETH) exceeds limit (${ethers.formatEther(feeLimit)} ETH)`);
     }
     
     // Prepare the call data: validator pubkey (48 bytes) + amount (8 bytes, big-endian)
@@ -180,7 +180,7 @@ async function getWithdrawalStats(): Promise<void> {
 async function main() {
   try {
     console.log("=== EIP-7002 Withdrawal Request Demo ===");
-    console.log(`Network: ${await provider.getNetwork()}`);
+    console.log(`Network: ${JSON.stringify(await provider.getNetwork())}`);
     console.log(`Wallet address: ${wallet.address}`);
     console.log(`Contract address: ${WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS}`);
     
@@ -188,20 +188,13 @@ async function main() {
     await getWithdrawalStats();
     
     // Example validator public key (replace with actual validator pubkey)
-    let exampleValidatorPubkey = "0x" + "1".repeat(96); // 48 bytes of 1s
-    exampleValidatorPubkey = "0x987181a942cb05c376b35c3877ea63aaeda34335b4912d6ef78e905c891c12d1c5a70b12db47bbf8c98e280281f02b46";
+    const exampleValidatorPubkey = process.env.VALIDATOR_PUBKEY || "";
     
     // Example withdrawal amount (0.1 ETH)
-    const withdrawalAmount = ethers.parseUnits("0.11", 9);;
-    console.log(`Withdrawal amount: ${withdrawalAmount}`);
-    // const withdrawalAmount = 32n;
+    const withdrawalAmount = ethers.parseUnits("0.11", 9);
     
     // Set a fee limit (1 ETH)
     const feeLimit = ethers.parseEther("1.0");
-    
-    console.log("\n=== Example Withdrawal Request ===");
-    console.log("Note: This is a demonstration with example data");
-    console.log("Replace with actual validator public key and amount");
 
     // TODO: Check if the caller address matches the withdrawal credential in production
     
@@ -209,17 +202,6 @@ async function main() {
     const txHash = await addWithdrawalRequest(exampleValidatorPubkey, withdrawalAmount, feeLimit);
     console.log(`Withdrawal request submitted: ${txHash}`);
     
-    console.log("\n=== Usage Instructions ===");
-    console.log("1. Replace 'exampleValidatorPubkey' with your actual validator public key");
-    console.log("2. Set the desired withdrawal amount");
-    console.log("3. Uncomment the addWithdrawalRequest call in main()");
-    console.log("4. Ensure your wallet has sufficient ETH for the fee");
-    console.log("5. Run the script");
-    
-    console.log("\n=== Important Notes ===");
-    console.log("- Fees are dynamic and based on network usage");
-    console.log("- Withdrawal requests are processed by the consensus layer");
-    console.log("- This is for partial withdrawals; full exits require different process");
     
   } catch (error) {
     console.error("❌ Main function error:", error);
