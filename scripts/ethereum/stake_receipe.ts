@@ -7,23 +7,13 @@ config();
 const privateKey = process.env.PRIVATE_KEY; // Replace with your actual private key
 const apiKey = process.env.API_KEY; // Replace with your actual API key
 
-// API request details for the Figment API
-const url = "https://api.figment.io/ethereum/validators";
+// API request headers for the Figment API
 const headers = {
   accept: "application/json",
   "content-type": "application/json",
-  "x-api-key": apiKey, 
+  "x-api-key": apiKey,
 };
 const withdrawalAddress = process.env.WITHDRAWAL_ADDRESS; // Replace with your actual withdrawal address
-const data = {
-  network: "hoodi",
-  validators_count: 1,
-  //amount: "32",
-  withdrawal_address: withdrawalAddress,
-  region: "ca-central-1",
-  //credentials_prefix: '0x02',
-};
-
 
 /**
  * Generate signature for unsigned transaction hash using ethers.js v6
@@ -37,14 +27,14 @@ const generateSignatureFromUnsignedTxHash = async (
 ): Promise<string> => {
   try {
     console.log("=== Generating Signature ===");
-     
+
     // 1. Format private key (ensure 0x prefix)
     const formattedPrivateKey = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`;
-    
+
     // 2. Create signing key and sign the hash
     const signingKey = new ethers.SigningKey(formattedPrivateKey);
     const signature = signingKey.sign(unsignedTransactionHash);
-    
+
     console.log("Generated signature components:");
     console.log("  r:", signature.r);
     console.log("  s:", signature.s);
@@ -52,21 +42,21 @@ const generateSignatureFromUnsignedTxHash = async (
     console.log("  yParity:", signature.yParity);
     console.log("  serialized:", signature.serialized);
     console.log("  compactSerialized:", signature.compactSerialized);
-    
+
     // 3. Verify the signature we just generated
     const recoveredPublicKey = ethers.SigningKey.recoverPublicKey(unsignedTransactionHash, signature);
     const recoveredAddress = ethers.computeAddress(recoveredPublicKey);
     const walletAddress = ethers.computeAddress(signingKey.publicKey);
-    
+
     console.log("Wallet address:", walletAddress);
     console.log("Recovered address:", recoveredAddress);
     console.log("Signature verification:", recoveredAddress.toLowerCase() === walletAddress.toLowerCase());
-    
+
     console.log("=============================");
-    
+
     // Return the serialized signature (standard format)
     return signature.serialized;
-    
+
   } catch (error) {
     console.error("Error generating signature:", error);
     throw error;
@@ -82,22 +72,31 @@ const broadcastTransaction = async (signature, unsignedTransactionSerialized) =>
       signature: signature,
       unsigned_transaction_serialized: unsignedTransactionSerialized
     },
-    { headers });
-    
+      { headers });
+
     return resp.data.data.transaction_hash
   } catch (e) {
     console.error("Broadcast Transaction Error:")
     console.error(JSON.stringify(e.response?.data || e.message, null, 2));
-    
+
   }
 }
 
 
 async function main() {
   // Send a POST request to the Figment API to create a new validator
-  let response = null;;
+  let response = null;
+  const data = {
+    network: "hoodi",
+    validators_count: 1,
+    amount: "32",
+    withdrawal_address: withdrawalAddress,
+    region: "ca-central-1",
+    credentials_prefix: '0x02',
+  };
+
   try {
-    response = await axios.post(url, data, { headers });
+    response = await axios.post(`https://api.figment.io/ethereum/validators`, data, { headers });
   } catch (error) {
     console.error("Error creating validator:", JSON.stringify(error.response?.data || error.message, null, 2));
     return;
@@ -122,7 +121,7 @@ async function main() {
   console.log(JSON.stringify(responseJson, null, 2));
 
   let signature = await generateSignatureFromUnsignedTxHash(unsignedTransactionHash, privateKey);
-  
+
   let txHash = "";
   txHash = await broadcastTransaction(signature, unsignedTransactionSerialized)
 
