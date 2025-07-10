@@ -37,11 +37,8 @@ async function submitFullExit(
     throw new Error("Validator pubkey must be a 48-byte hex string (0x + 96 hex chars)");
   }
 
-  // Use the maximum uint64 value to signal a full exit
-  const maxUint64 = 2n ** 64n - 1n;
-
   // Prepare calldata: pubkey (48 bytes) + amount (8 bytes, big-endian)
-  const amountBytes = ethers.toBeHex(maxUint64, 8);
+  const amountBytes = ethers.toBeHex(0, 8); // When full exit, amount is 0
   const callData = validatorPubkey + amountBytes.slice(2);
 
   // Get the current fee
