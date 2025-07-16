@@ -15,6 +15,27 @@ const headers = {
 };
 const withdrawalAddress = process.env.WITHDRAWAL_ADDRESS; // Replace with your actual withdrawal address
 
+const data = {
+  network: "hoodi",
+  validators_count: 1,
+  amount: "32.5",
+  withdrawal_address: withdrawalAddress,
+  region: "ca-central-1",
+  credentials_prefix: '0x02',
+};
+
+const obtainTransactionMessage = async (data) => {
+  try {
+    const resp = await axios.post(`https://api.figment.io/ethereum/validators`, data, { headers });
+
+    return resp;
+  } catch (e) {
+    console.error("Broadcast Transaction Error:")
+    console.error(JSON.stringify(e.response?.data || e.message, null, 2));
+    throw e;
+  }
+}
+
 /**
  * Generate signature for unsigned transaction hash using ethers.js v6
  * @param unsignedTransactionHash The unsigned transaction hash string
@@ -86,22 +107,14 @@ const broadcastTransaction = async (signature, unsignedTransactionSerialized) =>
 async function main() {
   // Send a POST request to the Figment API to create a new validator
   let response = null;
-  const data = {
-    network: "hoodi",
-    validators_count: 1,
-    amount: "32",
-    withdrawal_address: withdrawalAddress,
-    region: "ca-central-1",
-    credentials_prefix: '0x02',
-  };
 
   try {
-    response = await axios.post(`https://api.figment.io/ethereum/validators`, data, { headers });
+    response = await obtainTransactionMessage(data);
   } catch (error) {
-    console.error("Error creating validator:", JSON.stringify(error.response?.data || error.message, null, 2));
+    console.error("Error obtaining transaction message:", error);
     return;
   }
-  const responseJson = response.data;
+  let responseJson = response.data;
 
   // boradcast with unsignedTransactionSerialized + signature parameters
   let unsignedTransactionSerialized =
@@ -122,10 +135,7 @@ async function main() {
 
   let signature = await generateSignatureFromUnsignedTxHash(unsignedTransactionHash, privateKey);
 
-  let txHash = "";
-  txHash = await broadcastTransaction(signature, unsignedTransactionSerialized)
-
-
+  let txHash = await broadcastTransaction(signature, unsignedTransactionSerialized)
   console.log(`broadcasted transaction. explorer link: https://hoodi.etherscan.io/tx/${txHash}`)
 
 }

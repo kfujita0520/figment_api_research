@@ -14,9 +14,8 @@ const headers = {
   "x-api-key": apiKey,
 };
 const withdrawalAddress = process.env.WITHDRAWAL_ADDRESS; // Replace with your actual withdrawal address
-const withdrawAmount = 0.1;
+const compoundAmount = 1
 const pubKey = process.env.VALIDATOR_PUBKEY;
-
 
 const broadcastTransaction = async (signedTransaction) => {
   try {
@@ -30,12 +29,13 @@ const broadcastTransaction = async (signedTransaction) => {
   } catch (e) {
     console.error("Broadcast Transaction Error:")
     console.error(JSON.stringify(e.response?.data || e.message, null, 2));
+
   }
 }
 
-const generatePartialWithdarawalTx = async (amount, pubKey) => {
+const generateCompoundTx = async (amount, pubKey) => {
   try {
-    const resp = await axios.post(`https://api.figment.io/ethereum/withdrawal`, {
+    const resp = await axios.post(`https://api.figment.io/ethereum/compound`, {
         network: "hoodi",
         amount: amount.toString(),
         pubkey: pubKey, 
@@ -53,7 +53,8 @@ const generatePartialWithdarawalTx = async (amount, pubKey) => {
 
 async function main() {
 
-  let unsignedTransactionSerialized = await generatePartialWithdarawalTx(withdrawAmount, pubKey);
+  let unsignedTransactionSerialized = await generateCompoundTx(compoundAmount, pubKey);
+
   
   let wallet = new ethers.Wallet(privateKey);
   let unsignedTransaction = ethers.Transaction.from(unsignedTransactionSerialized);
