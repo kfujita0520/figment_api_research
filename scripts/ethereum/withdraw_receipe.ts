@@ -14,9 +14,32 @@ const headers = {
   "x-api-key": apiKey,
 };
 const withdrawalAddress = process.env.WITHDRAWAL_ADDRESS; // Replace with your actual withdrawal address
+
+// Supposed to be user input
 const withdrawAmount = 0.1;
 const pubKey = process.env.VALIDATOR_PUBKEY;
 
+const generatePartialWithdarawalTx = async (amount, pubKey) => {
+  try {
+    const resp = await axios.post(`https://api.figment.io/ethereum/withdrawal`, {
+        network: "hoodi",
+        amount: amount.toString(),
+        pubkey: pubKey, 
+      },
+      { headers });
+
+    return resp.data.data.unsigned_transaction_serialized
+  } catch (e) {
+    console.error("Withdrawal Transaction Error:")
+    console.error(JSON.stringify(e.response?.data || e.message, null, 2));
+  }
+}
+
+const signTransaction = async (unsignedTransactionSerialized, privateKey) => {
+  let wallet = new ethers.Wallet(privateKey);
+  let unsignedTransaction = ethers.Transaction.from(unsignedTransactionSerialized);
+  return await wallet.signTransaction(unsignedTransaction);
+}
 
 const broadcastTransaction = async (signedTransaction) => {
   try {
@@ -33,31 +56,11 @@ const broadcastTransaction = async (signedTransaction) => {
   }
 }
 
-const generatePartialWithdarawalTx = async (amount, pubKey) => {
-  try {
-    const resp = await axios.post(`https://api.figment.io/ethereum/withdrawal`, {
-        network: "hoodi",
-        amount: amount.toString(),
-        pubkey: pubKey, 
-      },
-      { headers });
-
-    return resp.data.data.unsigned_transaction_serialized
-  } catch (e) {
-    console.error("Withdrawal Transaction Error:")
-    console.error(JSON.stringify(e.response?.data || e.message, null, 2));
-
-  }
-}
-
-
 async function main() {
 
   let unsignedTransactionSerialized = await generatePartialWithdarawalTx(withdrawAmount, pubKey);
   
-  let wallet = new ethers.Wallet(privateKey);
-  let unsignedTransaction = ethers.Transaction.from(unsignedTransactionSerialized);
-  let signedTransaction = await wallet.signTransaction(unsignedTransaction);
+  let signedTransaction = await signTransaction(unsignedTransactionSerialized, privateKey);
 
   let txHash = await broadcastTransaction(signedTransaction);
 
