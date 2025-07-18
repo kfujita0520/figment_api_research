@@ -14,24 +14,11 @@ const headers = {
   "x-api-key": apiKey,
 };
 const withdrawalAddress = process.env.WITHDRAWAL_ADDRESS; // Replace with your actual withdrawal address
+
+// Supposed to be user input
 const compoundAmount = 1
 const pubKey = process.env.VALIDATOR_PUBKEY;
 
-const broadcastTransaction = async (signedTransaction) => {
-  try {
-    const resp = await axios.post(`https://api.figment.io/ethereum/broadcast`, {
-      network: "hoodi",
-      signed_transaction: signedTransaction
-    },
-    { headers });
-    
-    return resp.data.data.transaction_hash
-  } catch (e) {
-    console.error("Broadcast Transaction Error:")
-    console.error(JSON.stringify(e.response?.data || e.message, null, 2));
-
-  }
-}
 
 const generateCompoundTx = async (amount, pubKey) => {
   try {
@@ -50,15 +37,33 @@ const generateCompoundTx = async (amount, pubKey) => {
   }
 }
 
+const signTransaction = async (unsignedTransactionSerialized, privateKey) => {
+  let wallet = new ethers.Wallet(privateKey);
+  let unsignedTransaction = ethers.Transaction.from(unsignedTransactionSerialized);
+  return await wallet.signTransaction(unsignedTransaction);
+}
+
+const broadcastTransaction = async (signedTransaction) => {
+  try {
+    const resp = await axios.post(`https://api.figment.io/ethereum/broadcast`, {
+      network: "hoodi",
+      signed_transaction: signedTransaction
+    },
+    { headers });
+    
+    return resp.data.data.transaction_hash
+  } catch (e) {
+    console.error("Broadcast Transaction Error:")
+    console.error(JSON.stringify(e.response?.data || e.message, null, 2));
+
+  }
+}
 
 async function main() {
 
   let unsignedTransactionSerialized = await generateCompoundTx(compoundAmount, pubKey);
-
   
-  let wallet = new ethers.Wallet(privateKey);
-  let unsignedTransaction = ethers.Transaction.from(unsignedTransactionSerialized);
-  let signedTransaction = await wallet.signTransaction(unsignedTransaction);
+  let signedTransaction = await signTransaction(unsignedTransactionSerialized, privateKey);
 
   let txHash = await broadcastTransaction(signedTransaction);
 
