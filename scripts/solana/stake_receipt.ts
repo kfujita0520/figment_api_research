@@ -41,6 +41,29 @@ async function generateStakePayload(amount: number, voteAccount: string, funding
     }
 };
 
+async function getTxStatus(txHash: string) {
+    const API_URL = 'https://api.figment.io/solana/tx';
+
+    try {
+        console.log('Getting transaction status for:', txHash);
+        const response = await axios.get(API_URL, {
+            params: {
+                network: "devnet",
+                hash: txHash
+            },
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+                'x-api-key': API_KEY
+            }
+        });
+
+        return response.data;
+    } catch (error) {
+        console.error('Error:', error.response ? error.response.data : error.message);
+    }
+};
+
 async function broadcast(transaction_payload: string) {
     const API_URL = 'https://api.figment.io/solana/broadcast';
     // Define request body parameters
@@ -63,6 +86,94 @@ async function broadcast(transaction_payload: string) {
         console.error('Error:', error.response ? error.response.data : error.message);
     }
 };
+
+async function broadcastAndWaitForCompletion(
+    transactionPayload: string, 
+    maxRetries: number = 30, 
+    retryDelay: number = 2000
+): Promise<{txHash: string, status: any, success: boolean}> {
+    try {
+        console.log('🚀 Broadcasting transaction...');
+        
+        // Step 1: Broadcast the transaction
+        const broadcastResult = await broadcast(transactionPayload);
+        console.log('Broadcast Result:', broadcastResult.transaction_hash);
+        
+        if (!broadcastResult.transaction_hash) {
+            throw new Error('Failed to get transaction hash from broadcast response');
+        }
+        
+        const txHash = broadcastResult.transaction_hash;
+        console.log('✅ Transaction broadcasted successfully!');
+        console.log('�� Transaction Hash:', txHash);
+        console.log('🔍 Waiting for transaction confirmation...');
+        
+        // Step 2: Wait for transaction completion with polling
+        let attempts = 0;
+        let finalStatus = null;
+        
+        while (attempts < maxRetries) {
+            attempts++;
+            console.log(`📊 Checking status (attempt ${attempts}/${maxRetries})...`);
+            
+            try {
+                const statusResult = await getTxStatus(txHash);
+                console.log('Status Result:', statusResult);
+                
+                if (statusResult && statusResult.data) {
+                    const status = statusResult.data;
+                    console.log(`📈 Transaction Status: ${status.status || 'Unknown'}`);
+                    
+                    // Check if transaction is confirmed/finalized
+                    if (status.status === 'confirmed' || status.status === 'finalized' || status.status === 'success') {
+                        console.log('🎉 Transaction confirmed successfully!');
+                        finalStatus = status;
+                        break;
+                    } else if (status.status === 'failed' || status.status === 'error') {
+                        console.log('❌ Transaction failed!');
+                        finalStatus = status;
+                        break;
+                    }
+                }
+                
+                // Wait before next check
+                if (attempts < maxRetries) {
+                    console.log(`⏳ Waiting ${retryDelay}ms before next check...`);
+                    await new Promise(resolve => setTimeout(resolve, retryDelay));
+                }
+                
+            } catch (statusError) {
+                console.log(`⚠️ Status check failed (attempt ${attempts}):`, statusError.message);
+                
+                // If it's the last attempt, don't wait
+                if (attempts < maxRetries) {
+                    await new Promise(resolve => setTimeout(resolve, retryDelay));
+                }
+            }
+        }
+        
+        // Step 3: Return final result
+        if (finalStatus) {
+            const success = finalStatus.status === 'confirmed' || finalStatus.status === 'finalized' || finalStatus.status === 'success';
+            return {
+                txHash,
+                status: finalStatus,
+                success
+            };
+        } else {
+            console.log('⏰ Transaction status check timed out after maximum retries');
+            return {
+                txHash,
+                status: { status: 'timeout', message: 'Status check timed out' },
+                success: false
+            };
+        }
+        
+    } catch (error) {
+        console.error('❌ Error in broadcastAndWaitForCompletion:', error);
+        throw error;
+    }
+}
 
 async function signTransaction(unsignedTransactionHex: string) {
     
@@ -130,7 +241,7 @@ async function main() {
         console.log('Fully Signed Transaction:', fullySignedTransactionHex);
 
         // broadcast transaction
-        let result = await broadcast(fullySignedTransactionHex);
+        let result = await broadcastAndWaitForCompletion(fullySignedTransactionHex);
         console.log('Response:', result);
 
     } catch (error) {
