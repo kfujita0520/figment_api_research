@@ -101,7 +101,7 @@ async function broadcast(transaction_payload: string) {
 
 async function getStakes(network: string = "devnet") {
     const API_URL = 'https://api.figment.io/solana/stakes';
-    
+
     try {
         const response = await axios.get(API_URL, {
             params: {
@@ -134,20 +134,20 @@ async function checkInactiveStakes(targetStakeAccount: string, maxChecks: number
     while (checkCount < maxChecks && !inactiveFound) {
         checkCount++;
         const currentTime = new Date().toLocaleString();
-        
+
         console.log(`\n�� Check ${checkCount}/${maxChecks} - ${currentTime}`);
-        console.log('=' .repeat(50));
+        console.log('='.repeat(50));
 
         try {
             const response = await getStakes();
-            
+
             if (!response || !response.data) {
                 console.log('❌ No stakes data found');
                 continue;
             }
 
             // Filter for the specific stake account
-            const targetStakes = response.data.filter((stake: any) => 
+            const targetStakes = response.data.filter((stake: any) =>
                 stake.stake_account === targetStakeAccount
             );
 
@@ -155,7 +155,7 @@ async function checkInactiveStakes(targetStakeAccount: string, maxChecks: number
                 console.log(`❌ No stakes found for account: ${targetStakeAccount}`);
             } else {
                 console.log(`✅ Found ${targetStakes.length} stake(s) for account: ${targetStakeAccount}`);
-                
+
                 // Check each stake for inactive status
                 targetStakes.forEach((stake: any, index: number) => {
                     console.log(`\n📊 Stake ${index + 1}:`);
@@ -164,7 +164,7 @@ async function checkInactiveStakes(targetStakeAccount: string, maxChecks: number
                     console.log(`   Balance: ${stake.balance} SOL`);
                     console.log(`   Active Balance: ${stake.active_balance} SOL`);
                     console.log(`   Inactive Balance: ${stake.inactive_balance} SOL`);
-                    
+
                     if (stake.status === 'inactive') {
                         console.log('🎯 *** INACTIVE STAKE FOUND! ***');
                         inactiveFound = true;
@@ -186,7 +186,7 @@ async function checkInactiveStakes(targetStakeAccount: string, maxChecks: number
 
         } catch (error) {
             console.error(`❌ Error in check ${checkCount}:`, error.message);
-            
+
             // Wait before retrying even on error
             if (checkCount < maxChecks) {
                 console.log(`⏳ Waiting ${intervalMinutes} minutes before retry...`);
@@ -226,7 +226,7 @@ async function getTxStatus(txHash: string) {
 };
 
 async function signTransaction(unsignedTransactionHex: string) {
-    
+
     try {
         const privateKey = process.env.SOL_PRIVATE_KEY || "";
         const privateKeyBase58 = bs58.decode(privateKey);
@@ -237,12 +237,12 @@ async function signTransaction(unsignedTransactionHex: string) {
 
         // 2️⃣ Deserialize transaction
         const transaction = Transaction.from(transactionBuffer);
-        
+
 
         // 4️⃣ Sign the transaction (add your signature)
         transaction.partialSign(wallet); // This adds your signature to the existing ones
-        
-        
+
+
         //verify the signature status is all signed
         console.log("🔍 **Required Signers & Signatures:**");
         transaction.signatures.forEach((sig, index) => {
@@ -281,40 +281,40 @@ async function signTransaction(unsignedTransactionHex: string) {
 };
 
 async function broadcastAndWaitForCompletion(
-    transactionPayload: string, 
-    maxRetries: number = 30, 
-    retryDelay: number = 2000
-): Promise<{txHash: string, status: any, success: boolean}> {
+    transactionPayload: string,
+    maxRetries: number = 30,
+    retryDelay: number = 3000
+): Promise<{ txHash: string, status: any, success: boolean }> {
     try {
         console.log('🚀 Broadcasting transaction...');
-        
+
         // Step 1: Broadcast the transaction
         const broadcastResult = await broadcast(transactionPayload);
-        
+
         if (!broadcastResult.transaction_hash) {
             throw new Error('Failed to get transaction hash from broadcast response');
         }
-        
+
         const txHash = broadcastResult.transaction_hash;
         console.log('✅ Transaction broadcasted successfully!');
         console.log('�� Transaction Hash:', txHash);
         console.log('🔍 Waiting for transaction confirmation...');
-        
+
         // Step 2: Wait for transaction completion with polling
         let attempts = 0;
         let finalStatus = null;
-        
+
         while (attempts < maxRetries) {
             attempts++;
             console.log(`📊 Checking status (attempt ${attempts}/${maxRetries})...`);
-            
+
             try {
                 const statusResult = await getTxStatus(txHash);
-                
+
                 if (statusResult && statusResult.data) {
                     const status = statusResult.data;
                     console.log(`📈 Transaction Status: ${status.status || 'Unknown'}`);
-                    
+
                     // Check if transaction is confirmed/finalized
                     if (status.status === 'confirmed' || status.status === 'finalized' || status.status === 'success') {
                         console.log('🎉 Transaction confirmed successfully!');
@@ -326,23 +326,23 @@ async function broadcastAndWaitForCompletion(
                         break;
                     }
                 }
-                
+
                 // Wait before next check
                 if (attempts < maxRetries) {
                     console.log(`⏳ Waiting ${retryDelay}ms before next check...`);
                     await new Promise(resolve => setTimeout(resolve, retryDelay));
                 }
-                
+
             } catch (statusError) {
                 console.log(`⚠️ Status check failed (attempt ${attempts}):`, statusError.message);
-                
+
                 // If it's the last attempt, don't wait
                 if (attempts < maxRetries) {
                     await new Promise(resolve => setTimeout(resolve, retryDelay));
                 }
             }
         }
-        
+
         // Step 3: Return final result
         if (finalStatus) {
             const success = finalStatus.status === 'confirmed' || finalStatus.status === 'finalized' || finalStatus.status === 'success';
@@ -359,7 +359,7 @@ async function broadcastAndWaitForCompletion(
                 success: false
             };
         }
-        
+
     } catch (error) {
         console.error('❌ Error in broadcastAndWaitForCompletion:', error);
         throw error;
@@ -384,7 +384,7 @@ async function main() {
         console.log('Response:', result);
 
         // Start periodic check for inactive stakes
-        await checkInactiveStakes(stakeAccount, 100, 1);
+        await checkInactiveStakes(stakeAccount, 10000, 1);
 
 
         // generate withdrawal payload
