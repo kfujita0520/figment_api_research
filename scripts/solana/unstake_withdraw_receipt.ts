@@ -15,7 +15,7 @@ config();
 
 const validatorVoteAccount = "FwR3PbjS5iyqzLiLugrBqKSa5EKZ4vK9SKs7eQXtT59f";
 const fundingAccount = "7Dc8UevAZLTyehmuprb96pVuAmdcQh6hCdzVx7HBk4WA";
-const stakeAccount = "GCodAQfyuv79wbTj7i2F53vPZoSisarVttjvEGo36X8W";
+const stakeAccount = "62Zv8PuA5oPMN6Jp4v3YTnA89QLwaTAvYPnpk7L8ozmt";//"GCodAQfyuv79wbTj7i2F53vPZoSisarVttjvEGo36X8W";
 const API_KEY = process.env.API_KEY // Replace with your actual API key
 
 async function createUnstakeTransaction(stakeAccount: string) {
@@ -120,50 +120,6 @@ async function getStakes(network: string = "devnet") {
     }
 }
 
-async function getStakeByAccount(stakeAccount: string, network: string = "devnet") {
-    try {
-        console.log(`🔍 Fetching stakes for account: ${stakeAccount}`);
-        
-        const response = await getStakes(network);
-        
-        if (!response || !response.data) {
-            console.log('❌ No stakes data found');
-            return null;
-        }
-        
-        // Filter for the specific stake account
-        const filteredStakes = response.data.filter((stake: any) => 
-            stake.stake_account === stakeAccount
-        );
-        
-        if (filteredStakes.length === 0) {
-            console.log(`❌ No stakes found for account: ${stakeAccount}`);
-            return null;
-        }
-        
-        console.log(`✅ Found ${filteredStakes.length} stake(s) for account: ${stakeAccount}`);
-        
-        // Display the filtered results
-        filteredStakes.forEach((stake: any, index: number) => {
-            console.log(`\n📊 Stake ${index + 1}:`);
-            console.log(`   ID: ${stake.id}`);
-            console.log(`   Status: ${stake.status}`);
-            console.log(`   Balance: ${stake.balance} SOL`);
-            console.log(`   Active Balance: ${stake.active_balance} SOL`);
-            console.log(`   Inactive Balance: ${stake.inactive_balance} SOL`);
-            console.log(`   Balance USD: $${stake.balance_usd}`);
-            console.log(`   Vote Account: ${stake.vote_account}`);
-            console.log(`   Stake Authority: ${stake.stake_authority}`);
-            console.log(`   Withdraw Authority: ${stake.withdraw_authority}`);
-        });
-        
-        return filteredStakes;
-        
-    } catch (error) {
-        console.error('❌ Error fetching stake by account:', error);
-        return null;
-    }
-}
 
 async function checkInactiveStakes(targetStakeAccount: string, maxChecks: number = 100, intervalMinutes: number = 10) {
     console.log(`🔍 Starting periodic check for inactive stakes...`);
