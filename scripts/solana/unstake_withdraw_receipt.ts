@@ -238,10 +238,8 @@ async function signTransaction(unsignedTransactionHex: string) {
         // 2️⃣ Deserialize transaction
         const transaction = Transaction.from(transactionBuffer);
 
-
         // 4️⃣ Sign the transaction (add your signature)
         transaction.partialSign(wallet); // This adds your signature to the existing ones
-
 
         //verify the signature status is all signed
         console.log("🔍 **Required Signers & Signatures:**");
