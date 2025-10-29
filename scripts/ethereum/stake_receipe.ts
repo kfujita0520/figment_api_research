@@ -15,6 +15,7 @@ const headers = {
 };
 const withdrawalAddress = process.env.WITHDRAWAL_ADDRESS; // Replace with your actual withdrawal address
 
+//Supposed to be user input
 const data = {
   network: "hoodi",
   validators_count: 1,
@@ -24,17 +25,56 @@ const data = {
   credentials_prefix: '0x02',
 };
 
-const obtainTransactionMessage = async (data) => {
+/**
+ * Generate staking transaction from Figment API
+ * @param data The staking request data
+ * @returns Object containing unsigned_transaction_serialized and unsigned_transaction_hashed
+ */
+const generateStakeTx = async (data: any): Promise<{
+  unsigned_transaction_serialized: string;
+  unsigned_transaction_hashed: string;
+}> => {
   try {
+    console.log("=== Generating Staking Transaction ===");
+    console.log("Request data:", JSON.stringify(data, null, 2));
+
     const resp = await axios.post(`https://api.figment.io/ethereum/validators`, data, { headers });
 
-    return resp;
-  } catch (e) {
-    console.error("Broadcast Transaction Error:")
-    console.error(JSON.stringify(e.response?.data || e.message, null, 2));
-    throw e;
+    const responseJson = resp.data;
+
+    // Extract unsigned transaction serialized
+    const unsigned_transaction_serialized = 
+      responseJson?.meta?.staking_transaction?.unsigned_transaction_serialized;
+    if (!unsigned_transaction_serialized) {
+      throw new Error("unsigned_transaction_serialized not found in the response");
+    }
+
+    // Extract unsigned transaction hashed
+    const unsigned_transaction_hashed = 
+      responseJson?.meta?.staking_transaction?.unsigned_transaction_hashed;
+    if (!unsigned_transaction_hashed) {
+      throw new Error("unsigned_transaction_hashed not found in the response");
+    }
+
+    console.log("✅ Successfully generated staking transaction");
+    console.log("Unsigned transaction serialized:", unsigned_transaction_serialized);
+    console.log("Unsigned transaction hashed:", unsigned_transaction_hashed);
+
+    return {
+      unsigned_transaction_serialized,
+      unsigned_transaction_hashed
+    };
+
+  } catch (error) {
+    console.error("❌ Error generating staking transaction:");
+    if (error.response?.data) {
+      console.error(JSON.stringify(error.response.data, null, 2));
+    } else {
+      console.error(error.message);
+    }
+    throw error;
   }
-}
+};
 
 /**
  * Generate signature for unsigned transaction hash using ethers.js v6
@@ -99,43 +139,20 @@ const broadcastTransaction = async (signature, unsignedTransactionSerialized) =>
   } catch (e) {
     console.error("Broadcast Transaction Error:")
     console.error(JSON.stringify(e.response?.data || e.message, null, 2));
-
   }
 }
 
 
 async function main() {
-  // Send a POST request to the Figment API to create a new validator
-  let response = null;
+  // Generate staking transaction
+  const { unsigned_transaction_serialized, unsigned_transaction_hashed } = await generateStakeTx(data);
 
-  try {
-    response = await obtainTransactionMessage(data);
-  } catch (error) {
-    console.error("Error obtaining transaction message:", error);
-    return;
-  }
-  let responseJson = response.data;
+  // Generate signature from the hash
+  let signature = await generateSignatureFromUnsignedTxHash(unsigned_transaction_hashed, privateKey);
 
-  // boradcast with unsignedTransactionSerialized + signature parameters
-  let unsignedTransactionSerialized =
-    responseJson?.meta?.staking_transaction?.unsigned_transaction_serialized;
-  if (!unsignedTransactionSerialized) {
-    throw new Error("unsigned_transaction_serialized not found in the response");
-  }
-  console.log(`Unsigned transaction serialized: ${unsignedTransactionSerialized}`);
-
-  let unsignedTransactionHash =
-    responseJson?.meta?.staking_transaction?.unsigned_transaction_hashed;
-  if (!unsignedTransactionHash) {
-    throw new Error("unsigned_transaction_hashed not found in the response");
-  }
-  console.log(`Unsigned transaction hash: ${unsignedTransactionSerialized}`);
-
-  console.log(JSON.stringify(responseJson, null, 2));
-
-  let signature = await generateSignatureFromUnsignedTxHash(unsignedTransactionHash, privateKey);
-
-  let txHash = await broadcastTransaction(signature, unsignedTransactionSerialized)
+  // Broadcast transaction
+  let txHash = await broadcastTransaction(signature, unsigned_transaction_serialized)
+  
   console.log(`broadcasted transaction. explorer link: https://hoodi.etherscan.io/tx/${txHash}`)
 
 }
