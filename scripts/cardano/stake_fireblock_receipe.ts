@@ -5,17 +5,16 @@ import * as CSL from "@emurgo/cardano-serialization-lib-nodejs";
 import { config } from "dotenv";
 config();
 
-
+// Configuration
 const figment_apiKey = process.env.API_KEY; // Replace with your actual API key
-
 const fireblocks_apiSecret = fs.readFileSync("./credentials/fireblocks_secret.key", "utf8");
 const fireblocks_apiKey = process.env.FIREBLOCKS_API_KEY;
 const fireblocks = new FireblocksSDK(fireblocks_apiSecret, fireblocks_apiKey);
 
+
+// User Inputs
 const network = process.env.NETWORK || "preprod";
 const vaultAccountId = process.env.FIREBLOCKS_VAULT_ACCOUNT_IDS;
-
-const BLOCKFROST_API_KEY = process.env.BLOCKFROST_API_KEY;
 const poolId = "pool13la5erny3srx9u4fz9tujtl2490350f89r4w4qjhk0vdjmuv78v";
 
 
@@ -136,30 +135,19 @@ async function signCardanoTxWithFireblocks(signing_payload: string) : Promise<an
 
 }
 
-const broadcastTransaction = async (signedTransaction: string) => {
+async function broadcastTransaction(signedTransaction: string){
   try {
     const resp = await axios.post(`https://api.figment.io/cardano/broadcast`, {
-      network: "perprod",
+      network: "preprod",
       signed_transaction: signedTransaction
     },
       { headers });
 
-    return resp.data.data.transaction_hash
+    return resp.data.data.tx_hash
   } catch (e) {
     console.error("Broadcast Transaction Error:")
     console.error(JSON.stringify(e.response?.data || e, null, 2));
   }
-}
-
-function getBodyHashHex(unsignedTxHex: string): string {
-  // Parse the unsigned transaction to get the body
-  const tx = CSL.Transaction.from_hex(unsignedTxHex);
-  const txBody = tx.body();
-  
-  // Create FixedTransaction from body bytes to get access to transaction_hash()
-  const fixedTx = CSL.FixedTransaction.new_from_body_bytes(txBody.to_bytes());
-  
-  return fixedTx.transaction_hash().to_hex();
 }
 
 async function mergeSignedTransaction(unsignedHex: string, 
@@ -189,63 +177,9 @@ async function mergeSignedTransaction(unsignedHex: string,
 function vkeyWitnessFrom(pubKeyHex: string, sigHex: string, unsignedTx: string) {   
 
   const vkey = CSL.Vkey.new(CSL.PublicKey.from_hex(pubKeyHex));
-  const sig = CSL.Ed25519Signature.from_bytes(Buffer.from(sigHex, "hex"));
-  
-  const isValid = verifySignature(unsignedTx, pubKeyHex, sigHex);
-  if (!isValid) {
-    console.warn("Signature verification failed for key:", pubKeyHex);
-  }
+  const sig = CSL.Ed25519Signature.from_hex(sigHex);
   
   return CSL.Vkeywitness.new(vkey, sig);
-}
-
-function verifySignature(unsignedTxHex: string, pubKeyHex: string, sigHex: string): boolean {
-  try {
-      // 1. Parse the unsigned transaction
-      const tx = CSL.Transaction.from_hex(unsignedTxHex);
-
-      // 2. Get the transaction body hash (this is what should be signed)
-      const txBody = tx.body();
-      const fixedTx = CSL.FixedTransaction.new_from_body_bytes(txBody.to_bytes());
-      const bodyHash = fixedTx.transaction_hash().to_hex();
-
-      // 3. Convert signature to Ed25519Signature
-      const signature = CSL.Ed25519Signature.from_hex(sigHex);
-
-      // 4. Convert public key
-      const publicKey = CSL.PublicKey.from_hex(pubKeyHex);
-
-      // 5. Verify signature against the body hash
-      const isValid = publicKey.verify(Buffer.from(bodyHash, "hex"), signature);
-
-      console.log("Body hash:", bodyHash);
-      console.log("Signature valid:", isValid);
-
-      return isValid;
-  } catch (error) {
-      console.error("Verification error:", error);
-      return false;
-  }
-}
-
-
-async function submitToBlockfrost(cborBytes: Uint8Array) {
-  const url = "https://cardano-preprod.blockfrost.io/api/v0/tx/submit";
-
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "project_id": BLOCKFROST_API_KEY,
-      "Content-Type": "application/cbor",
-    },
-    body: Buffer.from(cborBytes),
-  });
-
-  const text = await res.text();
-  if (!res.ok) throw new Error(`Submit failed ${res.status}: ${text}`);
-
-  console.log("Tx hash: ", text.trim());
-  return text.trim(); // tx hash
 }
 
 
@@ -254,7 +188,7 @@ async function main() {
   const delegatorAddress = vaultAddresses[0].address;
 
   // Generate staking transaction
-  const { unsigned_transaction_serialized, signing_payload } = await generateStakeTx(delegatorAddress, poolId);
+  let { unsigned_transaction_serialized, signing_payload } = await generateStakeTx(delegatorAddress, poolId);
 
   // Generate signature from the signing_payload
   const { paymentKeySig, stakingKeySig, paymentPubKey, stakingPubKey } = await signCardanoTxWithFireblocks(signing_payload);  
@@ -264,8 +198,7 @@ async function main() {
   console.log("merged signed: ", signed.to_hex());
   
   // Broadcast transaction
-  // let txHash = await broadcastTransaction(signed.to_hex());
-  let txHash = await submitToBlockfrost(signed.to_bytes());
+  let txHash = await broadcastTransaction(signed.to_hex());
   
   console.log(`broadcasted transaction. TxHash: ${txHash}`)
 

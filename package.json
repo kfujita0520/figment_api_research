@@ -1,12 +1,19 @@
 {
   "dependencies": {
     "@coral-xyz/borsh": "^0.30.1",
+    "@emurgo/cardano-serialization-lib-nodejs": "^15.0.1",
     "@ethereumjs/common": "^10.0.0",
     "@ethereumjs/tx": "^10.0.0",
     "@solana/web3.js": "^1.98.0",
     "axios": "^1.7.9",
+    "bip39": "^3.1.0",
+    "bitcoinjs-lib": "^6.1.7",
     "dotenv": "^16.4.7",
+    "ecpair": "^3.0.0",
     "ethers": "^6.14.3",
+    "fireblocks-sdk": "^5.38.0",
+    "lucid-cardano": "^0.10.11",
+    "tiny-secp256k1": "^2.2.4",
     "tsc": "^2.0.4",
     "tweetnacl": "^1.0.3"
   },
