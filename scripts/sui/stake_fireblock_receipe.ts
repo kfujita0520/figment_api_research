@@ -1,7 +1,6 @@
 import { Ed25519PublicKey } from '@mysten/sui/keypairs/ed25519';
-import { Transaction } from '@mysten/sui/transactions';
 import { messageWithIntent } from '@mysten/sui/cryptography';
-import { fromBase64, fromHex, toBase64 } from '@mysten/sui/utils';
+import { fromHex, toBase64 } from '@mysten/sui/utils';
 import axios from 'axios';
 import fs from "fs";
 import { FireblocksSDK, PeerType, TransactionOperation } from "fireblocks-sdk";
@@ -24,7 +23,7 @@ async function generateStakePayload(amount: number, validatorAccount: string, de
     const API_URL = 'https://api.figment.io/sui/stake';
     // Define request body parameters
     const requestBody = {
-        network: "testnet",
+        network: network,
         amount: amount,   
         validator_address: validatorAccount,
         delegator_address: delegatorAccount
@@ -52,7 +51,7 @@ async function broadcast(unsigned_transaction_serialized: string, signature: str
     const API_URL = 'https://api.figment.io/sui/broadcast';
     // Define request body parameters
     const requestBody = {
-        network: "testnet",
+        network: network,
         unsigned_transaction_serialized: unsigned_transaction_serialized,
         signature: signature
     };
@@ -249,11 +248,12 @@ function convertFireblocksSignatureToSui(
 
 async function main() {
     try {
+        const vaultAddresses = await fireblocks.getDepositAddresses(vaultAccountId, network === "mainnet" ? "SUI" : "SUI_TEST");
+        const delegatorAddress = vaultAddresses[0].address;
+        console.log('Delegator Address:', delegatorAddress);
         // generate stake payload
-        let response = await generateStakePayload(stakeAmount, validatorAccount, delegatorAccount);
+        let response = await generateStakePayload(stakeAmount, validatorAccount, delegatorAddress);
         let unsignedTransactionHex = response.data.unsigned_transaction_serialized;
-        // let unsignedTransactionHex = "000003000800ca9a3b0000000001010000000000000000000000000000000000000000000000000000000000000005010000000000000001002022b35a7481fb136e5585c43421cf8ab49d0e219e902dedc40c2778acdcc7bc9c020200010100000000000000000000000000000000000000000000000000000000000000000000030a7375695f73797374656d11726571756573745f6164645f7374616b6500030101000300000000010200b0e0bce616aacbd836122d89a0f20b68abdecf566a4fe0742fa9fe6c9563455c0298d3c1ed4065ad8d3caad4d022f1b8c20aa3b018de676c3bd4e9564c610c20075b8141290000000020dc59a6c694e3967c88d51e8236843c73bcfd1663169994d3b3c88a50a38809efb0d4bf02284906fb0c40d166b8491ee7816e9db3b6c4f2060d2a6a33eda4569b424e5028000000002002e7ec76b525847c0b5ee7f6ff1035c8749c91b678a7b7fa688dd39357613d42b0e0bce616aacbd836122d89a0f20b68abdecf566a4fe0742fa9fe6c9563455ce80300000000000000e1f5050000000000"
-        // let unsignedTransactionHex = "000003000800ca9a3b0000000001010000000000000000000000000000000000000000000000000000000000000005010000000000000001002022b35a7481fb136e5585c43421cf8ab49d0e219e902dedc40c2778acdcc7bc9c020200010100000000000000000000000000000000000000000000000000000000000000000000030a7375695f73797374656d11726571756573745f6164645f7374616b65000301010003000000000102000e30610a83ffbbe157231e869ad6716b816d633d9c58e22b7100a66002df0afd04970ece4fa99d02794e81ca464315e15285b545b0282d274a3c97441722b3e0a6298141290000000020852dbd0eadee0c1cda5f9a910ec3bde33e7d5bff60a62effe9e4b6bce8773cac3b413808417ac22313c4cff3e556f69b0c10ba43164e1fbe83a79dafd68584099514d014000000002081efae14450622d8b7588106fa9635e4875f72829c9b477937a75717231a78cc5d73df8fe7aa5123ae24c322a96fd715f3ce4be146516ca714dd748c61adc2489414d0140000000020334277e52fe53fef78b2e34185bb62a7f8abf30bad9f2da46cb3cafb69ea6e0697365b7670b818a328a8dd76664f610c71ce774cb4cf770b5b842f8b695e7ae39214d01400000000208aff773fe5409e9018985c55bd06158ddc467e81bcb7efa662a1641264921cac0e30610a83ffbbe157231e869ad6716b816d633d9c58e22b7100a66002df0afde80300000000000000e1f5050000000000";
         console.log('Unsigned Transaction:', unsignedTransactionHex);
 
         // sign transaction - now sends intent message digest to Fireblocks
