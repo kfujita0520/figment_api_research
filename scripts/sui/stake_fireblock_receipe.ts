@@ -7,14 +7,15 @@ import { FireblocksSDK, PeerType, TransactionOperation } from "fireblocks-sdk";
 import { config } from "dotenv";
 config();
 
-
-const stakeAmount = 1;
-const validatorAccount = "0x22b35a7481fb136e5585c43421cf8ab49d0e219e902dedc40c2778acdcc7bc9c";
-const delegatorAccount = "0xb0e0bce616aacbd836122d89a0f20b68abdecf566a4fe0742fa9fe6c9563455c";
-const API_KEY = process.env.API_KEY // Replace with your actual API key
+// Configuration
+const API_KEY = process.env.API_KEY // Replace with your actual Figment API key
 const fireblocks_apiSecret = fs.readFileSync("./credentials/fireblocks_secret.key", "utf8");
 const fireblocks_apiKey = process.env.FIREBLOCKS_API_KEY;
 const fireblocks = new FireblocksSDK(fireblocks_apiSecret, fireblocks_apiKey);
+
+// User Inputs
+const stakeAmount = process.env.SUI_STAKE_AMOUNT ? Number(process.env.SUI_STAKE_AMOUNT) : 1;
+const validatorAccount = process.env.SUI_VALIDATOR_ACCOUNT; //Figment validator address on testnet "0x22b35a7481fb136e5585c43421cf8ab49d0e219e902dedc40c2778acdcc7bc9c";
 const vaultAccountId = process.env.FIREBLOCKS_VAULT_ACCOUNT_IDS;
 const network = process.env.NETWORK || "testnet";
 
