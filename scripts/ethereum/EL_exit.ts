@@ -64,17 +64,25 @@ async function submitFullExit(
   }
 }
 
-// --- ENTRY POINT ---
 
+/**
+ * Main function to demonstrate exit request
+ */
+async function main() {
+  try {
+    console.log("=== EIP-7002 Exit Request Demo ===");
+    const validatorPubkey = process.env.EXIT_PUBKEY || "";
+    // Optional: set a fee limit (in wei)
+    // const feeLimit = ethers.parseEther("1.0");
+    await submitFullExit(validatorPubkey /*, feeLimit */);
+    
+    
+  } catch (error) {
+    console.error("❌ Main function error:", error);
+  }
+}
+
+// Run main function if this file is executed directly
 if (require.main === module) {
-  (async () => {
-    try {
-      const validatorPubkey = process.env.VALIDATOR_PUBKEY || "";
-      // Optional: set a fee limit (in wei)
-      // const feeLimit = ethers.parseEther("1.0");
-      await submitFullExit(validatorPubkey /*, feeLimit */);
-    } catch (err) {
-      console.error(err);
-    }
-  })();
+  main().catch(console.error);
 }
