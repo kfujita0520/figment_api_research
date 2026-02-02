@@ -2,6 +2,7 @@ import { ethers } from "ethers";
 import { config } from "dotenv";
 config();
 
+// Configuration
 // EIP-7002 Configuration Constants
 const WITHDRAWAL_REQUEST_PREDEPLOY_ADDRESS = "0x00000961Ef480Eb55e80D19ad83579A64c007002";
 
@@ -15,6 +16,12 @@ if (!privateKey || !rpcUrl) {
 
 const provider = new ethers.JsonRpcProvider(rpcUrl);
 const wallet = new ethers.Wallet(privateKey, provider);
+
+// User Input
+const pubKey = process.env.VALIDATOR_PUBKEY || "";
+// Example withdrawal amount (0.11 ETH)
+//please note that amount should be sepcified as gwei(10^9)
+const withdrawAmount = ethers.parseUnits("0.11", 9);
 
 
 
@@ -188,10 +195,11 @@ async function main() {
     await getWithdrawalStats();
     
     // Example validator public key (replace with actual validator pubkey)
-    const exampleValidatorPubkey = process.env.VALIDATOR_PUBKEY || "";
+    const validatorPubkey = pubKey;
     
-    // Example withdrawal amount (0.1 ETH)
-    const withdrawalAmount = ethers.parseUnits("0.11", 9);
+    // Example withdrawal amount (0.11 ETH)
+    const withdrawalAmount = withdrawAmount;
+    
     
     // Set a fee limit (1 ETH)
     const feeLimit = ethers.parseEther("1.0");
@@ -199,7 +207,7 @@ async function main() {
     // TODO: Check if the caller address matches the withdrawal credential in production
     
     // Uncomment the following lines to actually submit a withdrawal request
-    const txHash = await addWithdrawalRequest(exampleValidatorPubkey, withdrawalAmount, feeLimit);
+    const txHash = await addWithdrawalRequest(validatorPubkey, withdrawalAmount, feeLimit);
     console.log(`Withdrawal request submitted: ${txHash}`);
     
     
