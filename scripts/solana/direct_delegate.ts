@@ -13,15 +13,41 @@ import bs58 from "bs58";
 import { config } from "dotenv";
 config();
 
-const validatorVoteAccount = "FwR3PbjS5iyqzLiLugrBqKSa5EKZ4vK9SKs7eQXtT59f";
+// User Input
+const validatorVoteAccount = process.env.SOL_VOTE_ACCCOUNT || "";
+const amount = "0.01";
+
+// config
+// Setup our connection and wallet
+const connection = new Connection(clusterApiUrl("devnet"), "confirmed");
+
+const privateKey = process.env.SOL_PRIVATE_KEY || "";
+const privateKeyBase58 = bs58.decode(privateKey);
+const wallet = Keypair.fromSecretKey(privateKeyBase58);
+
+
+function solToLamportsNumber(sol: string): number {
+  const input = sol.trim();
+  if (!/^\d+(\.\d+)?$/.test(input)) {
+    throw new Error(`Invalid SOL amount: "${sol}"`);
+  }
+
+  const decimals = LAMPORTS_PER_SOL.toString().length - 1; // 9
+  const [whole, frac = ""] = input.split(".");
+  const fracPadded = (frac + "0".repeat(decimals)).slice(0, decimals);
+
+  const lamportsBig =
+    BigInt(whole) * BigInt(LAMPORTS_PER_SOL) +
+    BigInt(fracPadded || "0");
+
+  if (lamportsBig > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error(`Lamports exceed safe number range: ${lamportsBig.toString()}`);
+  }
+
+  return Number(lamportsBig);
+}
   
 async function main() {
-    // Setup our connection and wallet
-    const connection = new Connection(clusterApiUrl("devnet"), "confirmed");
-
-    const privateKey = process.env.PRIVATE_KEY || "";
-    const privateKeyBase58 = bs58.decode(privateKey);
-    const wallet = Keypair.fromSecretKey(privateKeyBase58);
 
   
     // Create a keypair for our stake account
@@ -31,8 +57,12 @@ async function main() {
     const minimumRent = await connection.getMinimumBalanceForRentExemption(
       StakeProgram.space
     );
-    const amountUserWantsToStake = LAMPORTS_PER_SOL / 1000; // This is can be user input. For now, we'll hardcode to 0.5 SOL
+
+    const amountUserWantsToStake = solToLamportsNumber(amount);
+    console.log(`Amount to stake: ${amountUserWantsToStake / LAMPORTS_PER_SOL} SOL`);
     const amountToStake = minimumRent + amountUserWantsToStake;
+
+
   
     // Setup a transaction to create our stake account
     // Note: `StakeProgram.createAccount` returns a `Transaction` preconfigured with the necessary `TransactionInstruction`s
