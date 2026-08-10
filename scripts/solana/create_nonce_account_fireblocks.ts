@@ -45,7 +45,36 @@ import {
     throw new Error("FIREBLOCKS_API_KEY is required");
   }
   
-  const fireblocks = new FireblocksSDK(secretKey, apiKey);
+  // Current FIREBLOCKS_API_KEY + fireblocks_secret_sandbox.key pair works on
+  // production API (vault assets like SOL_TEST). sandbox-api.fireblocks.io
+  // returns Unauthorized code -7 for this pair. Override via FIREBLOCKS_BASE_URL.
+  const FIREBLOCKS_BASE_URL =
+    process.env.FIREBLOCKS_BASE_URL || "https://api.fireblocks.io";
+  // #region agent log
+  fetch("http://127.0.0.1:7581/ingest/34f5d292-8894-4eba-8f3e-3f953e106378", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Debug-Session-Id": "729395",
+    },
+    body: JSON.stringify({
+      sessionId: "729395",
+      runId: process.env.DEBUG_RUN_ID || "nonce-create",
+      hypothesisId: "URL",
+      location: "create_nonce_account_fireblocks.ts:init",
+      message: "Fireblocks SDK init (no secrets)",
+      data: {
+        baseUrl: FIREBLOCKS_BASE_URL,
+        vault: VAULT_ACCOUNT_ID,
+        asset: FIREBLOCKS_ASSET_ID,
+        secretPath: secretKeyPath,
+        apiKeyLen: apiKey.length,
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
+  const fireblocks = new FireblocksSDK(secretKey, apiKey, FIREBLOCKS_BASE_URL);
   
   const connection = new Connection(
     clusterApiUrl(
