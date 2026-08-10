@@ -1,16 +1,18 @@
 /**
- * Figment Solana stake using a durable nonce account.
+ * Figment Solana durable-nonce stake + Fireblocks PROGRAM_CALL sign/broadcast.
  * Docs: https://docs.figment.io/reference/solana-stake
  *
- * Funding account is resolved from Fireblocks vault deposit address
- * (FIREBLOCKS_VAULT_ACCOUNT_IDS + SOL / SOL_TEST).
+ * Flow:
+ * 1. Resolve funding from Fireblocks vault deposit address
+ * 2. Create stake tx via Figment (with nonce_account)
+ * 3. Fireblocks PROGRAM_CALL signs vault + broadcasts
  *
  * Required env:
  *   FIREBLOCKS_API_KEY             Fireblocks API key
  *   FIREBLOCKS_SECRET_KEY_PATH     path to Fireblocks API user private key PEM
  *   FIREBLOCKS_VAULT_ACCOUNT_IDS   vault id (e.g. "4")
  *   FIREBLOCKS_SOL_NONCE_ACCOUNT   on-chain nonce account pubkey
- *   API_KEY                Figment API key (x-api-key)
+ *   API_KEY                        Figment API key (x-api-key)
  *
  * Optional env:
  *   FIREBLOCKS_BASE_URL        default https://api.fireblocks.io
@@ -18,6 +20,7 @@
  *   NETWORK                    mainnet | testnet | devnet  (default: devnet)
  *   AMOUNT_SOL                 min 1.1 (default: 1.1)
  *   VOTE_ACCOUNT               default: Figment devnet vote account
+ *   SKIP_FIREBLOCKS            "1" = create Figment tx only (no PROGRAM_CALL)
  */
 import {
   Connection,
@@ -32,7 +35,12 @@ import {
 import axios from "axios";
 import fs from "fs";
 import path from "path";
-import { FireblocksSDK } from "fireblocks-sdk";
+import {
+  FireblocksSDK,
+  TransactionStatus,
+  PeerType,
+  TransactionOperation,
+} from "fireblocks-sdk";
 import { config } from "dotenv";
 
 config({ path: path.join(__dirname, "../../.env") });
@@ -41,7 +49,7 @@ config();
 const FIGMENT_STAKE_URL = "https://api.figment.io/solana/stake";
 
 const FIREBLOCKS_API_KEY = process.env.FIREBLOCKS_API_KEY || "";
-const API_KEY = process.env.API_KEY || "";
+const FIGMENT_API_KEY = process.env.API_KEY || "";
 const NETWORK = (process.env.NETWORK || "devnet") as
   | "mainnet"
   | "testnet"
@@ -57,6 +65,7 @@ const FIREBLOCKS_ASSET_ID =
   NETWORK === "mainnet" ? "SOL" : "SOL_TEST";
 const FIREBLOCKS_BASE_URL =
   process.env.FIREBLOCKS_BASE_URL || "https://api.fireblocks.io";
+const SKIP_FIREBLOCKS = process.env.SKIP_FIREBLOCKS === "1";
 const secretKeyPath =
   process.env.FIREBLOCKS_SECRET_KEY_PATH ||
   path.join(__dirname, "../../credentials/fireblocks_secret.key");
@@ -65,22 +74,23 @@ function requireEnv(name: string, value: string) {
   if (!value) throw new Error(`${name} is required`);
 }
 
-async function resolveFundingFromFireblocksVault(): Promise<{
-  address: string;
-  vaultId: string;
-  assetId: string;
-}> {
+function createFireblocksClient(): FireblocksSDK {
   requireEnv("FIREBLOCKS_API_KEY", FIREBLOCKS_API_KEY);
-  requireEnv("FIREBLOCKS_VAULT_ACCOUNT_IDS", VAULT_ACCOUNT_ID);
   if (!fs.existsSync(secretKeyPath)) {
     throw new Error(`Fireblocks secret key not found: ${secretKeyPath}`);
   }
   const secretKey = fs.readFileSync(secretKeyPath, "utf8");
-  const fireblocks = new FireblocksSDK(
-    secretKey,
-    FIREBLOCKS_API_KEY,
-    FIREBLOCKS_BASE_URL
-  );
+  return new FireblocksSDK(secretKey, FIREBLOCKS_API_KEY, FIREBLOCKS_BASE_URL);
+}
+
+async function resolveFundingFromFireblocksVault(
+  fireblocks: FireblocksSDK
+): Promise<{
+  address: string;
+  vaultId: string;
+  assetId: string;
+}> {
+  requireEnv("FIREBLOCKS_VAULT_ACCOUNT_IDS", VAULT_ACCOUNT_ID);
   const deposits = await fireblocks.getDepositAddresses(
     VAULT_ACCOUNT_ID,
     FIREBLOCKS_ASSET_ID
@@ -102,10 +112,85 @@ async function createStakeTx(body: Record<string, unknown>) {
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
-      "x-api-key": API_KEY,
+      "x-api-key": FIGMENT_API_KEY,
     },
   });
   return data?.data ?? data;
+}
+
+async function waitForTxCompletion(
+  fireblocks: FireblocksSDK,
+  fbTx: { id: string }
+) {
+  let tx: any = await fireblocks.getTransactionById(fbTx.id);
+
+  while (tx.status !== TransactionStatus.COMPLETED) {
+    if (
+      [
+        TransactionStatus.BLOCKED,
+        TransactionStatus.FAILED,
+        TransactionStatus.REJECTED,
+        TransactionStatus.CANCELLED,
+      ].includes(tx.status)
+    ) {
+      console.error("Fireblocks tx failed:", JSON.stringify(tx, null, 2));
+      throw new Error(
+        `Fireblocks status: ${tx.status} ${tx.subStatus || ""}`.trim()
+      );
+    }
+
+    console.log("Fireblocks status:", tx.status, tx.subStatus || "");
+    await new Promise((r) => setTimeout(r, 4000));
+    tx = await fireblocks.getTransactionById(fbTx.id);
+  }
+
+  return fireblocks.getTransactionById(fbTx.id);
+}
+
+/**
+ * Sign vault remaining slots and broadcast via Fireblocks PROGRAM_CALL.
+ * useDurableNonce:false — Figment payload already embeds durable nonce.
+ */
+async function signAndBroadcastWithFireblocks(
+  fireblocks: FireblocksSDK,
+  base64Tx: string,
+  note: string
+) {
+  const fbTx = await fireblocks.createTransaction({
+    assetId: FIREBLOCKS_ASSET_ID,
+    operation: "PROGRAM_CALL" as TransactionOperation,
+    source: {
+      type: PeerType.VAULT_ACCOUNT,
+      id: String(VAULT_ACCOUNT_ID),
+    },
+    note,
+    extraParameters: {
+      programCallData: base64Tx,
+      useDurableNonce: false,
+    },
+  });
+
+  console.log("Fireblocks tx id:", fbTx.id);
+  return waitForTxCompletion(fireblocks, fbTx);
+}
+
+/**
+ * Prefer API base64; else serialize hex wire tx to base64.
+ */
+function toProgramCallBase64(stake: any, hex?: string): string {
+  if (stake.unsigned_tx_serialized_base64) {
+    return String(stake.unsigned_tx_serialized_base64).replace(/\s/g, "");
+  }
+  if (!hex) {
+    throw new Error("No base64 or hex transaction payload from Figment");
+  }
+  const tx = Transaction.from(Buffer.from(hex, "hex"));
+  return tx
+    .serialize({
+      requireAllSignatures: false,
+      verifySignatures: false,
+    })
+    .toString("base64");
 }
 
 async function verifyNonceOnChain(
@@ -243,23 +328,24 @@ function printFigmentPayloadAndInstructions(stake: any, hex?: string) {
 }
 
 async function main() {
-  requireEnv("FIREBLOCKS_SOL_NONCE_ACCOUNT", NONCE_ACCOUNT);
-  requireEnv("FIGMENT_API_KEY", API_KEY);
+  requireEnv("FIREBLOCKS_SOL_NONCE_ACCOUNT", NONCE_ACCOUNT.trim());
+  requireEnv("API_KEY", FIGMENT_API_KEY);
   if (AMOUNT_SOL < 1.1) {
     throw new Error("amount_sol must be >= 1.1 (Figment minimum)");
   }
 
-  // Funding = Fireblocks vault SOL address (dynamic)
+  const fireblocks = createFireblocksClient();
+
   const {
     address: fundingAddress,
     vaultId,
     assetId,
-  } = await resolveFundingFromFireblocksVault();
+  } = await resolveFundingFromFireblocksVault(fireblocks);
   const fundingPubkey = new PublicKey(fundingAddress);
 
-  const noncePubkey = new PublicKey(NONCE_ACCOUNT);
+  const noncePubkey = new PublicKey(NONCE_ACCOUNT.trim());
   const authorityPubkey = NONCE_AUTHORITY
-    ? new PublicKey(NONCE_AUTHORITY)
+    ? new PublicKey(NONCE_AUTHORITY.trim())
     : fundingPubkey;
 
   const cluster =
@@ -309,21 +395,11 @@ async function main() {
   const hex =
     stake.unsigned_tx_serialized_hex ||
     stake.unsigned_transaction_serialized;
-  const b64 = stake.unsigned_tx_serialized_base64;
 
   printFigmentPayloadAndInstructions(stake, hex);
 
   if (hex) {
     console.log("\nunsigned_tx_serialized_hex length:", hex.length);
-    console.log("HEX (for wallets that want hex):");
-    console.log(hex);
-  }
-  if (b64) {
-    console.log("\nBASE64 (Fireblocks programCallData 用):");
-    console.log(b64.replace(/\n/g, ""));
-  }
-
-  if (hex) {
     const tx = Transaction.from(Buffer.from(hex, "hex"));
     console.log("\nRequired signers:");
     tx.signatures.forEach((s, i) => {
@@ -335,11 +411,42 @@ async function main() {
     });
   }
 
+  const programCallData = toProgramCallBase64(stake, hex);
+  console.log("\nprogramCallData (base64) length:", programCallData.length);
+
+  if (SKIP_FIREBLOCKS) {
+    console.log(
+      "\nSKIP_FIREBLOCKS=1 — not submitting to Fireblocks. Base64:\n",
+      programCallData
+    );
+    return;
+  }
+
   console.log(
-    "\nCreate-only mode. Sign via Fireblocks PROGRAM_CALL with base64 above (source = vault " +
-      vaultId +
-      ")."
+    "\nSubmitting Fireblocks PROGRAM_CALL (useDurableNonce=false)..."
   );
+  const completed = await signAndBroadcastWithFireblocks(
+    fireblocks,
+    programCallData,
+    `Figment durable-nonce stake stake_account=${stake.stake_account || "?"} amount=${AMOUNT_SOL}`
+  );
+
+  console.log("\n--- Fireblocks result ---");
+  console.log("id:      ", completed.id);
+  console.log("status:  ", completed.status);
+  console.log("subStatus:", completed.subStatus);
+  console.log("txHash:  ", completed.txHash);
+
+  if (completed.txHash) {
+    const clusterQs =
+      NETWORK === "mainnet"
+        ? ""
+        : "?cluster=devnet";
+    console.log(
+      "Explorer:",
+      `https://explorer.solana.com/tx/${completed.txHash}${clusterQs}`
+    );
+  }
 }
 
 main()
