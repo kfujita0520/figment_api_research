@@ -286,10 +286,11 @@ function printInstructions(tx: Transaction) {
 
 async function main() {
   requireEnv("FIREBLOCKS_SOL_NONCE_ACCOUNT", NONCE_ACCOUNT);
-  // if (AMOUNT_SOL < 1.1) {
-  //   // Figment min is 1.1; native stake can be lower — keep or relax
-  //   console.warn("AMOUNT_SOL < 1.1 (ok for native stake; Figment min is 1.1)");
-  // }
+  if (AMOUNT_SOL < 1.1) {
+    // Fireblocks min is 1.1; native stake can be lower — keep or relax
+    console.error("AMOUNT_SOL < 1.1 (ok for native stake; Fireblocks min is 1.1)");
+    throw new Error("AMOUNT_SOL < 1.1");
+  }
 
   const fireblocks = createFireblocksClient();
   const { address: fundingAddress, vaultId, assetId } =
@@ -351,10 +352,6 @@ async function main() {
   console.log("Fireblocks id:", completed.id);
   console.log("status:", completed.status, completed.subStatus);
   console.log("txHash:", completed.txHash);
-}
-
-function amountSolValid(sol: number): boolean {
-  return Number.isFinite(sol) && sol > 0;
 }
 
 main()
