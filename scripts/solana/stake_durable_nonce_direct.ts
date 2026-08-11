@@ -8,7 +8,8 @@
  * 2. Load on-chain nonce (recentBlockhash = durable nonce value)
  * 3. Build: AdvanceNonce + createStakeAccount + delegate
  * 4. partialSign(stakeAccount only) — vault must sign funding/authority
- * 5. Optionally Fireblocks PROGRAM_CALL (SKIP_FIREBLOCKS=1 to skip)
+ * 5. Fireblocks PROGRAM_CALL with signOnly=true (no Fireblocks broadcast)
+ * 6. Extract signedProgramCallData and sendRawTransaction yourself
  *
  * Required env:
  *   FIREBLOCKS_API_KEY             Fireblocks API key
@@ -23,6 +24,8 @@
  *   AMOUNT_SOL                 default: 1.1
  *   VOTE_ACCOUNT               default: Figment devnet vote account
  *   SKIP_FIREBLOCKS            "1" = build payload only (no PROGRAM_CALL)
+ *   SKIP_BROADCAST             "1" = sign only (no sendRawTransaction)
+ *   SKIP_SIMULATE              "1" = skip preflight simulate before broadcast
  */
 import {
   Connection,
@@ -36,6 +39,7 @@ import {
   Authorized,
   Lockup,
   LAMPORTS_PER_SOL,
+  SendTransactionError,
 } from "@solana/web3.js";
 import fs from "fs";
 import path from "path";
@@ -66,9 +70,14 @@ const FIREBLOCKS_ASSET_ID = NETWORK === "mainnet" ? "SOL" : "SOL_TEST";
 const FIREBLOCKS_BASE_URL =
   process.env.FIREBLOCKS_BASE_URL || "https://api.fireblocks.io";
 const SKIP_FIREBLOCKS = process.env.SKIP_FIREBLOCKS === "1";
+const SKIP_BROADCAST = process.env.SKIP_BROADCAST === "1";
+const SKIP_SIMULATE = process.env.SKIP_SIMULATE === "1";
 const secretKeyPath =
   process.env.FIREBLOCKS_SECRET_KEY_PATH ||
   path.join(__dirname, "../../credentials/fireblocks_secret.key");
+
+/** Docs use SIGNED; older fireblocks-sdk typings may omit it. */
+const FB_SIGNED = "SIGNED";
 
 function requireEnv(name: string, value: string) {
   if (!value) throw new Error(`${name} is required`);
@@ -111,20 +120,30 @@ async function resolveFundingFromFireblocksVault(
   };
 }
 
-async function waitForTransactionCompletion(
+/**
+ * Wait until Fireblocks finishes vault signing (signOnly → SIGNED).
+ * COMPLETED is accepted too (workspace/policy variants).
+ */
+async function waitForFireblocksSigned(
   fireblocks: FireblocksSDK,
   fbTx: { id: string }
 ) {
-  let current = await fireblocks.getTransactionById(fbTx.id);
-  while (current.status !== TransactionStatus.COMPLETED) {
-    if (
-      [
-        TransactionStatus.BLOCKED,
-        TransactionStatus.FAILED,
-        TransactionStatus.REJECTED,
-        TransactionStatus.CANCELLED,
-      ].includes(current.status)
-    ) {
+  const terminalFail = new Set([
+    TransactionStatus.BLOCKED,
+    TransactionStatus.FAILED,
+    TransactionStatus.REJECTED,
+    TransactionStatus.CANCELLED,
+    "DROPPED",
+  ]);
+  const terminalOk = new Set([
+    FB_SIGNED,
+    TransactionStatus.COMPLETED,
+    TransactionStatus.CONFIRMED,
+  ]);
+
+  let current: any = await fireblocks.getTransactionById(fbTx.id);
+  while (!terminalOk.has(current.status)) {
+    if (terminalFail.has(current.status)) {
       console.error(
         "Fireblocks transaction failed:",
         JSON.stringify(current, null, 2)
@@ -136,7 +155,7 @@ async function waitForTransactionCompletion(
       );
     }
     console.log(
-      "Waiting for Fireblocks status:",
+      "Waiting for Fireblocks sign:",
       current.status,
       current.subStatus || ""
     );
@@ -146,12 +165,43 @@ async function waitForTransactionCompletion(
   return fireblocks.getTransactionById(fbTx.id);
 }
 
-async function signAndBroadcastWithFireblocks(
+/**
+ * Extract base64 signed wire after PROGRAM_CALL + signOnly.
+ * Primary field (docs / multi-vault): signedProgramCallData
+ */
+function extractSignedProgramCallData(fbTx: any): string {
+  const candidates = [
+    fbTx?.signedProgramCallData,
+    fbTx?.signed_program_call_data,
+    fbTx?.extraParameters?.signedProgramCallData,
+    fbTx?.extraParameters?.signed_program_call_data,
+    // Some workspaces return the updated payload in the same field
+    fbTx?.extraParameters?.programCallData,
+  ].filter((v) => typeof v === "string" && v.length > 0);
+
+  if (!candidates.length) {
+    console.error(
+      "Could not find signedProgramCallData. Full Fireblocks tx keys/response:"
+    );
+    console.error(JSON.stringify(fbTx, null, 2));
+    throw new Error(
+      "Expected signedProgramCallData after SIGNED status (see Fireblocks response dump above)"
+    );
+  }
+
+  return String(candidates[0]).replace(/\s/g, "");
+}
+
+/**
+ * Fireblocks PROGRAM_CALL with signOnly — vault signs only, no FB broadcast.
+ * Docs: https://developers.fireblocks.com/reference/interact-with-solana-programs
+ */
+async function signWithFireblocks(
   fireblocks: FireblocksSDK,
   base64Tx: string,
   note: string
-) {
-  const fbTx = await fireblocks.createTransaction({
+): Promise<{ fbTx: any; signedBase64: string }> {
+  const created = await fireblocks.createTransaction({
     assetId: FIREBLOCKS_ASSET_ID,
     operation: "PROGRAM_CALL" as TransactionOperation,
     source: {
@@ -161,14 +211,86 @@ async function signAndBroadcastWithFireblocks(
     note,
     extraParameters: {
       programCallData: base64Tx,
-      // Figment (or this script) already embeds durable nonce; do not wrap again
+      // Payload already embeds durable nonce AdvanceNonce
       useDurableNonce: false,
+      signOnly: true,
     },
   });
 
-  console.log("Fireblocks transaction created:", fbTx.id);
-  const completed = await waitForTransactionCompletion(fireblocks, fbTx);
-  return completed;
+  console.log("Fireblocks signOnly PROGRAM_CALL created:", created.id);
+  const signedTx = await waitForFireblocksSigned(fireblocks, created);
+  console.log(
+    "Fireblocks sign status:",
+    signedTx.status,
+    signedTx.subStatus || ""
+  );
+
+  const signedBase64 = extractSignedProgramCallData(signedTx);
+  return { fbTx: signedTx, signedBase64 };
+}
+
+async function simulateSignedTx(
+  connection: Connection,
+  signedBase64: string
+): Promise<void> {
+  const tx = Transaction.from(Buffer.from(signedBase64, "base64"));
+  const sim = await connection.simulateTransaction(tx);
+  console.log("\n--- simulateTransaction ---");
+  console.log("err: ", sim.value.err);
+  console.log("unitsConsumed:", sim.value.unitsConsumed);
+  if (sim.value.logs?.length) {
+    console.log("logs (last 20):");
+    sim.value.logs.slice(-20).forEach((l) => console.log(" ", l));
+  }
+  if (sim.value.err) {
+    throw new Error(
+      `Simulation failed: ${JSON.stringify(sim.value.err)} — not broadcasting`
+    );
+  }
+}
+
+async function broadcastSignedTx(
+  connection: Connection,
+  signedBase64: string,
+  durableConfirm: {
+    nonceAccount: PublicKey;
+    nonceValue: string;
+  }
+): Promise<string> {
+  const raw = Buffer.from(signedBase64, "base64");
+  try {
+    // Slot bound for durable-nonce confirmation strategy (non-deprecated API)
+    const minContextSlot = await connection.getSlot("confirmed");
+    const sig = await connection.sendRawTransaction(raw, {
+      skipPreflight: false,
+      preflightCommitment: "confirmed",
+      maxRetries: 3,
+      minContextSlot,
+    });
+    console.log("Submitted signature:", sig);
+    const conf = await connection.confirmTransaction(
+      {
+        signature: sig,
+        minContextSlot,
+        nonceAccountPubkey: durableConfirm.nonceAccount,
+        nonceValue: durableConfirm.nonceValue,
+      },
+      "confirmed"
+    );
+    if (conf.value.err) {
+      throw new Error(
+        `Transaction confirmed with error: ${JSON.stringify(conf.value.err)}`
+      );
+    }
+    return sig;
+  } catch (e) {
+    if (e instanceof SendTransactionError) {
+      const logs = await e.getLogs(connection).catch(() => null);
+      console.error("SendTransactionError:", e.message);
+      if (logs) console.error("logs:", logs);
+    }
+    throw e;
+  }
 }
 
 /**
@@ -286,10 +408,8 @@ function printInstructions(tx: Transaction) {
 
 async function main() {
   requireEnv("FIREBLOCKS_SOL_NONCE_ACCOUNT", NONCE_ACCOUNT);
-  if (AMOUNT_SOL < 1.1) {
-    // Fireblocks min is 1.1; native stake can be lower — keep or relax
-    console.error("AMOUNT_SOL < 1.1 (ok for native stake; Fireblocks min is 1.1)");
-    throw new Error("AMOUNT_SOL < 1.1");
+  if (!(Number.isFinite(AMOUNT_SOL) && AMOUNT_SOL > 0)) {
+    throw new Error(`Invalid AMOUNT_SOL: ${AMOUNT_SOL}`);
   }
 
   const fireblocks = createFireblocksClient();
@@ -313,6 +433,7 @@ async function main() {
   console.log("Nonce authority: ", authority.toBase58());
   console.log("Vote account:    ", voteAccount.toBase58());
   console.log("Amount SOL:      ", AMOUNT_SOL);
+  console.log("Mode:            PROGRAM_CALL + signOnly → self broadcast");
 
   const payload = await buildDurableNonceStakeTx({
     connection,
@@ -330,7 +451,7 @@ async function main() {
   console.log("lamports:        ", payload.lamports, `(rent ${payload.rent})`);
   console.log("HEX length:      ", payload.unsignedTxHex.length);
   console.log("BASE64 length:   ", payload.unsignedTxBase64.length);
-  console.log("\nBASE64 (Fireblocks programCallData):");
+  console.log("\nBASE64 (partial-signed programCallData):");
   console.log(payload.unsignedTxBase64);
 
   printSigners(payload.transaction);
@@ -342,16 +463,39 @@ async function main() {
   }
 
   console.log(
-    "\nSubmitting Fireblocks PROGRAM_CALL (useDurableNonce=false)..."
+    "\nSubmitting Fireblocks PROGRAM_CALL (signOnly=true, useDurableNonce=false)..."
   );
-  const completed = await signAndBroadcastWithFireblocks(
+  const { fbTx, signedBase64 } = await signWithFireblocks(
     fireblocks,
     payload.unsignedTxBase64,
-    `Native durable-nonce stake account=${payload.stakeAccount} amount=${AMOUNT_SOL}`
+    `Native durable-nonce stake (signOnly) account=${payload.stakeAccount} amount=${AMOUNT_SOL}`
   );
-  console.log("Fireblocks id:", completed.id);
-  console.log("status:", completed.status, completed.subStatus);
-  console.log("txHash:", completed.txHash);
+  console.log("Fireblocks id:", fbTx.id);
+  console.log("Signed BASE64 length:", signedBase64.length);
+  console.log("\nBASE64 (signed programCallData — for sendRawTransaction):");
+  console.log(signedBase64);
+
+  if (SKIP_BROADCAST) {
+    console.log("\nSKIP_BROADCAST=1 — signed only, not broadcasting");
+    return;
+  }
+
+  if (!SKIP_SIMULATE) {
+    await simulateSignedTx(connection, signedBase64);
+  }
+
+  console.log("\nBroadcasting via RPC sendRawTransaction...");
+  const signature = await broadcastSignedTx(connection, signedBase64, {
+    nonceAccount,
+    nonceValue: payload.durableNonce,
+  });
+  console.log("\nOn-chain signature:", signature);
+  console.log(
+    "Explorer:",
+    NETWORK === "mainnet"
+      ? `https://solscan.io/tx/${signature}`
+      : `https://solscan.io/tx/${signature}?cluster=${NETWORK}`
+  );
 }
 
 main()
