@@ -31,7 +31,7 @@ import {
   config();
   
   /* ---------- Config ---------- */
-  const NETWORK = process.env.NETWORK || "devnet"; // "devnet" | "mainnet-beta"
+  const NETWORK = process.env.NETWORK || "devnet"; // "devnet" | "mainnet"
   const VAULT_ACCOUNT_ID = process.env.FIREBLOCKS_VAULT_ACCOUNT_IDS || "1";
   const FIREBLOCKS_ASSET_ID = NETWORK === "mainnet" ? "SOL" : "SOL_TEST";
   
@@ -78,7 +78,7 @@ import {
   
   const connection = new Connection(
     clusterApiUrl(
-      NETWORK === "mainnet-beta" || NETWORK === "mainnet"
+      NETWORK === "mainnet"
         ? "mainnet-beta"
         : "devnet"
     ),
@@ -216,11 +216,6 @@ import {
       }`
     );
     console.log("Nonce account pubkey:", nonceAccount.publicKey.toBase58());
-  
-    // Optional: wait and read account
-    if (txHash) {
-      await connection.confirmTransaction(txHash, "confirmed");
-    }
   
     const info = await connection.getParsedAccountInfo(nonceAccount.publicKey);
     if (info.value) {
