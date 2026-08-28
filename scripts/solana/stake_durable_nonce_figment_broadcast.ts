@@ -13,9 +13,8 @@
  * 3. Create stake tx via Figment (with nonce_account)
  * 4. Fireblocks PROGRAM_CALL with signOnly=true — vault signs, no FB broadcast
  * 5. Extract signedProgramCallData (base64), verify every signature slot filled
- * 6. Simulate against local RPC — abort before spending the nonce on a bad tx
- * 7. base64 -> hex, POST /solana/broadcast
- * 8. Poll GET /solana/activities/{txHash} until confirmed
+ * 6. base64 -> hex, POST /solana/broadcast
+ * 7. Poll GET /solana/activities/{txHash} until confirmed
  *
  * Required env:
  *   FIREBLOCKS_API_KEY             Fireblocks API key
@@ -37,13 +36,9 @@ import {
   PublicKey,
   clusterApiUrl,
   NonceAccount,
-  SystemProgram,
-  StakeProgram,
-  ComputeBudgetProgram,
 } from "@solana/web3.js";
 import axios from "axios";
 import fs from "fs";
-import path from "path";
 import {
   FireblocksSDK,
   TransactionStatus,
@@ -52,7 +47,6 @@ import {
 } from "fireblocks-sdk";
 import { config } from "dotenv";
 
-// config({ path: path.join(__dirname, "../../.env") });
 config();
 
 const FIGMENT_STAKE_URL = "https://api.figment.io/solana/stake";
@@ -79,9 +73,7 @@ const FIREBLOCKS_ASSET_ID =
   NETWORK === "mainnet" ? "SOL" : "SOL_TEST";
 const FIREBLOCKS_BASE_URL =
   process.env.FIREBLOCKS_BASE_URL || "https://api.fireblocks.io";
-const secretKeyPath =
-  process.env.FIREBLOCKS_SECRET_KEY_PATH;
-  // || path.join(__dirname, "../../credentials/fireblocks_secret.key");
+const secretKeyPath = process.env.FIREBLOCKS_SECRET_KEY_PATH;
 
 function requireEnv(name: string, value: string) {
   if (!value) throw new Error(`${name} is required`);
@@ -148,8 +140,7 @@ async function waitForFireblocksSigned(
   ]);
   const terminalOk = new Set<string>([
     FB_SIGNED,
-    TransactionStatus.COMPLETED,
-    TransactionStatus.CONFIRMED,
+    TransactionStatus.COMPLETED
   ]);
 
   let current: any = await fireblocks.getTransactionById(fbTx.id);
@@ -265,25 +256,6 @@ function verifySignedTx(signedBase64: string): Transaction {
     throw new Error(`Missing signature(s): ${missing.join(", ")}`);
   }
   return tx;
-}
-
-async function simulateSignedTx(
-  connection: Connection,
-  tx: Transaction
-): Promise<void> {
-  const sim = await connection.simulateTransaction(tx);
-  console.log("\n--- simulateTransaction ---");
-  console.log("err:          ", sim.value.err);
-  console.log("unitsConsumed:", sim.value.unitsConsumed);
-  if (sim.value.logs?.length) {
-    console.log("logs (last 20):");
-    sim.value.logs.slice(-20).forEach((l) => console.log(" ", l));
-  }
-  if (sim.value.err) {
-    throw new Error(
-      `Simulation failed: ${JSON.stringify(sim.value.err)} — not broadcasting`
-    );
-  }
 }
 
 /**
@@ -418,109 +390,6 @@ async function verifyNonceOnChain(
   return na;
 }
 
-const KNOWN_PROGRAMS: Record<string, string> = {
-  [SystemProgram.programId.toBase58()]: "System Program",
-  [StakeProgram.programId.toBase58()]: "Stake Program",
-  [ComputeBudgetProgram.programId.toBase58()]: "Compute Budget Program",
-  ["MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"]: "Memo",
-  ["Memo1UhkJRfHyvLMcVucJwxXeuD728EqVDDwQDxFMNo"]: "Memo (legacy)",
-};
-
-function systemIxName(data: Buffer): string {
-  if (data.length < 4) return `System(unknown, len=${data.length})`;
-  const ix = data.readUInt32LE(0);
-  const names: Record<number, string> = {
-    0: "CreateAccount",
-    1: "Assign",
-    2: "Transfer",
-    3: "CreateAccountWithSeed",
-    4: "AdvanceNonceAccount",
-    5: "WithdrawNonceAccount",
-    6: "InitializeNonceAccount",
-    7: "AuthorizeNonceAccount",
-  };
-  return names[ix] || `System(ix=${ix})`;
-}
-
-function stakeIxName(data: Buffer): string {
-  if (data.length < 4) return `Stake(unknown, len=${data.length})`;
-  const ix = data.readUInt32LE(0);
-  const names: Record<number, string> = {
-    0: "Initialize",
-    1: "Authorize",
-    2: "DelegateStake",
-    3: "Split",
-    4: "Withdraw",
-    5: "Deactivate",
-    6: "SetLockup",
-    7: "Merge",
-    8: "AuthorizeWithSeed",
-    9: "InitializeChecked",
-    10: "AuthorizeChecked",
-    11: "AuthorizeCheckedWithSeed",
-    12: "SetLockupChecked",
-  };
-  return names[ix] || `Stake(ix=${ix})`;
-}
-
-function computeBudgetIxName(data: Buffer): string {
-  if (data.length < 1) return "ComputeBudget(empty)";
-  const tag = data[0];
-  const names: Record<number, string> = {
-    0: "RequestUnitsDeprecated",
-    1: "RequestHeapFrame",
-    2: "SetComputeUnitLimit",
-    3: "SetComputeUnitPrice",
-    4: "SetLoadedAccountsDataSizeLimit",
-  };
-  return names[tag] || `ComputeBudget(tag=${tag})`;
-}
-
-function decodeInstructionName(programId: PublicKey, data: Buffer): string {
-  const id = programId.toBase58();
-  if (id === SystemProgram.programId.toBase58()) return systemIxName(data);
-  if (id === StakeProgram.programId.toBase58()) return stakeIxName(data);
-  if (id === ComputeBudgetProgram.programId.toBase58())
-    return computeBudgetIxName(data);
-  return KNOWN_PROGRAMS[id] || id;
-}
-
-function printFigmentPayloadAndInstructions(stake: any, hex: string) {
-  console.log("\n========== Figment API payload (raw JSON) ==========");
-  console.log(JSON.stringify(stake, null, 2));
-
-  const tx = Transaction.from(Buffer.from(hex.replace(/\s/g, ""), "hex"));
-
-  console.log("\n========== Decoded transaction ==========");
-  console.log("feePayer:       ", tx.feePayer?.toBase58());
-  console.log("recentBlockhash:", tx.recentBlockhash);
-  console.log(
-    "signatures:",
-    tx.signatures.map((s) => ({
-      pubkey: s.publicKey.toBase58(),
-      signed: !!s.signature,
-    }))
-  );
-
-  console.log("\n========== Instructions ==========");
-  tx.instructions.forEach((ix, i) => {
-    const data = Buffer.from(ix.data);
-    const programName =
-      KNOWN_PROGRAMS[ix.programId.toBase58()] || ix.programId.toBase58();
-    const name = decodeInstructionName(ix.programId, data);
-    console.log(`\n--- Instruction [${i}] ${name} ---`);
-    console.log("  programId: ", ix.programId.toBase58(), `(${programName})`);
-    console.log("  data (hex):", data.toString("hex"));
-    console.log("  data (len):", data.length);
-    console.log("  accounts:");
-    ix.keys.forEach((k, j) => {
-      console.log(
-        `    [${j}] ${k.pubkey.toBase58()}  signer=${k.isSigner} writable=${k.isWritable}`
-      );
-    });
-  });
-}
-
 async function main() {
   requireEnv("FIREBLOCKS_SOL_NONCE_ACCOUNT", NONCE_ACCOUNT.trim());
   requireEnv("API_KEY", FIGMENT_API_KEY);
@@ -591,8 +460,6 @@ async function main() {
     throw new Error("No unsigned_transaction_serialized from Figment Stake API");
   }
 
-  printFigmentPayloadAndInstructions(stake, hex);
-
   console.log("\nunsigned_transaction_serialized length:", String(hex).length);
   const tx = Transaction.from(Buffer.from(String(hex).replace(/\s/g, ""), "hex"));
   console.log("\nRequired signers:");
@@ -610,8 +477,7 @@ async function main() {
     `Figment durable-nonce stake stake_account=${stake.stake_account || "?"} amount=${AMOUNT_SOL}`
   );
 
-  const signedTx = verifySignedTx(signedBase64);
-  await simulateSignedTx(connection, signedTx);
+  verifySignedTx(signedBase64);
 
   // Fireblocks hands back base64; Figment /solana/broadcast expects hex
   const signedBuffer = Buffer.from(signedBase64, "base64");

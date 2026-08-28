@@ -33,7 +33,6 @@ import {
 } from "@solana/web3.js";
 import axios from "axios";
 import fs from "fs";
-import path from "path";
 import {
   FireblocksSDK,
   TransactionStatus,
@@ -42,7 +41,6 @@ import {
 } from "fireblocks-sdk";
 import { config } from "dotenv";
 
-// config({ path: path.join(__dirname, "../../.env") });
 config();
 
 const FIGMENT_STAKE_URL = "https://api.figment.io/solana/stake";
@@ -66,7 +64,6 @@ const FIREBLOCKS_BASE_URL =
   process.env.FIREBLOCKS_BASE_URL || "https://api.fireblocks.io";
 const secretKeyPath =
   process.env.FIREBLOCKS_SECRET_KEY_PATH;
-  // || path.join(__dirname, "../../credentials/fireblocks_secret.key");
 
 function requireEnv(name: string, value: string) {
   if (!value) throw new Error(`${name} is required`);
