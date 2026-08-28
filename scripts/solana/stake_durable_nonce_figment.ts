@@ -20,7 +20,6 @@
  *   NETWORK                    mainnet | testnet | devnet  (default: devnet)
  *   AMOUNT_SOL                 min 1.1 (default: 1.1)
  *   VOTE_ACCOUNT               default: Figment devnet vote account
- *   SKIP_FIREBLOCKS            "1" = create Figment tx only (no PROGRAM_CALL)
  */
 import {
   Connection,
@@ -43,7 +42,7 @@ import {
 } from "fireblocks-sdk";
 import { config } from "dotenv";
 
-config({ path: path.join(__dirname, "../../.env") });
+// config({ path: path.join(__dirname, "../../.env") });
 config();
 
 const FIGMENT_STAKE_URL = "https://api.figment.io/solana/stake";
@@ -65,10 +64,9 @@ const FIREBLOCKS_ASSET_ID =
   NETWORK === "mainnet" ? "SOL" : "SOL_TEST";
 const FIREBLOCKS_BASE_URL =
   process.env.FIREBLOCKS_BASE_URL || "https://api.fireblocks.io";
-const SKIP_FIREBLOCKS = process.env.SKIP_FIREBLOCKS === "1";
 const secretKeyPath =
-  process.env.FIREBLOCKS_SECRET_KEY_PATH ||
-  path.join(__dirname, "../../credentials/fireblocks_secret.key");
+  process.env.FIREBLOCKS_SECRET_KEY_PATH;
+  // || path.join(__dirname, "../../credentials/fireblocks_secret.key");
 
 function requireEnv(name: string, value: string) {
   if (!value) throw new Error(`${name} is required`);
@@ -175,16 +173,12 @@ async function signAndBroadcastWithFireblocks(
 }
 
 /**
- * Prefer API base64; else serialize hex wire tx to base64.
+ * Figment Stake returns unsigned_transaction_serialized (hex wire).
+ * Fireblocks programCallData expects base64.
  */
-function toProgramCallBase64(stake: any, hex?: string): string {
-  if (stake.unsigned_tx_serialized_base64) {
-    return String(stake.unsigned_tx_serialized_base64).replace(/\s/g, "");
-  }
-  if (!hex) {
-    throw new Error("No base64 or hex transaction payload from Figment");
-  }
-  const tx = Transaction.from(Buffer.from(hex, "hex"));
+function unsignedHexToProgramCallBase64(hex: string): string {
+  const cleaned = String(hex).replace(/\s/g, "");
+  const tx = Transaction.from(Buffer.from(cleaned, "hex"));
   return tx
     .serialize({
       requireAllSignatures: false,
@@ -286,16 +280,11 @@ function decodeInstructionName(programId: PublicKey, data: Buffer): string {
   return KNOWN_PROGRAMS[id] || id;
 }
 
-function printFigmentPayloadAndInstructions(stake: any, hex?: string) {
+function printFigmentPayloadAndInstructions(stake: any, hex: string) {
   console.log("\n========== Figment API payload (raw JSON) ==========");
   console.log(JSON.stringify(stake, null, 2));
 
-  if (!hex) {
-    console.log("\n(no hex payload to decode instructions)");
-    return;
-  }
-
-  const tx = Transaction.from(Buffer.from(hex, "hex"));
+  const tx = Transaction.from(Buffer.from(hex.replace(/\s/g, ""), "hex"));
 
   console.log("\n========== Decoded transaction ==========");
   console.log("feePayer:       ", tx.feePayer?.toBase58());
@@ -331,7 +320,7 @@ async function main() {
   requireEnv("FIREBLOCKS_SOL_NONCE_ACCOUNT", NONCE_ACCOUNT.trim());
   requireEnv("API_KEY", FIGMENT_API_KEY);
   if (AMOUNT_SOL < 1.1) {
-    throw new Error("amount_sol must be >= 1.1 (Figment minimum)");
+    throw new Error("amount_sol must be >= 1.1 (Fireblocks minimum)");
   }
 
   const fireblocks = createFireblocksClient();
@@ -392,35 +381,26 @@ async function main() {
   console.log("last_valid_block_height:", stake.last_valid_block_height);
   console.log("network:                ", stake.network);
 
-  const hex =
-    stake.unsigned_tx_serialized_hex ||
-    stake.unsigned_transaction_serialized;
+  const hex = stake.unsigned_transaction_serialized;
+  if (!hex) {
+    throw new Error("No unsigned_transaction_serialized from Figment Stake API");
+  }
 
   printFigmentPayloadAndInstructions(stake, hex);
 
-  if (hex) {
-    console.log("\nunsigned_tx_serialized_hex length:", hex.length);
-    const tx = Transaction.from(Buffer.from(hex, "hex"));
-    console.log("\nRequired signers:");
-    tx.signatures.forEach((s, i) => {
-      console.log(
-        `  ${i + 1}. ${s.publicKey.toBase58()} → ${
-          s.signature ? "pre-signed" : "MISSING"
-        }`
-      );
-    });
-  }
-
-  const programCallData = toProgramCallBase64(stake, hex);
-  console.log("\nprogramCallData (base64) length:", programCallData.length);
-
-  if (SKIP_FIREBLOCKS) {
+  console.log("\nunsigned_transaction_serialized length:", String(hex).length);
+  const tx = Transaction.from(Buffer.from(String(hex).replace(/\s/g, ""), "hex"));
+  console.log("\nRequired signers:");
+  tx.signatures.forEach((s, i) => {
     console.log(
-      "\nSKIP_FIREBLOCKS=1 — not submitting to Fireblocks. Base64:\n",
-      programCallData
+      `  ${i + 1}. ${s.publicKey.toBase58()} → ${
+        s.signature ? "pre-signed" : "MISSING"
+      }`
     );
-    return;
-  }
+  });
+
+  const programCallData = unsignedHexToProgramCallBase64(hex);
+  console.log("\nprogramCallData (base64) length:", programCallData.length);
 
   console.log(
     "\nSubmitting Fireblocks PROGRAM_CALL (useDurableNonce=false)..."
