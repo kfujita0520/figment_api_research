@@ -1,11 +1,21 @@
 /**
- * Figment Solana durable-nonce stake + Fireblocks PROGRAM_CALL sign/broadcast.
+ * Figment Solana durable-nonce stake — Fireblocks SIGNS ONLY, Figment broadcasts.
  * Docs: https://docs.figment.io/reference/solana-stake
+ *       https://docs.figment.io/reference/solana-broadcast
+ *       https://docs.figment.io/reference/get-solana-activity
+ *
+ * Sibling script stake_durable_nonce_figment.ts lets Fireblocks sign AND
+ * broadcast (PROGRAM_CALL without signOnly). This one splits the two steps.
  *
  * Flow:
  * 1. Resolve funding from Fireblocks vault deposit address
- * 2. Create stake tx via Figment (with nonce_account)
- * 3. Fireblocks PROGRAM_CALL signs vault + broadcasts
+ * 2. Verify nonce account on-chain
+ * 3. Create stake tx via Figment (with nonce_account)
+ * 4. Fireblocks PROGRAM_CALL with signOnly=true — vault signs, no FB broadcast
+ * 5. Extract signedProgramCallData (base64), verify every signature slot filled
+ * 6. Simulate against local RPC — abort before spending the nonce on a bad tx
+ * 7. base64 -> hex, POST /solana/broadcast
+ * 8. Poll GET /solana/activities/{txHash} until confirmed
  *
  * Required env:
  *   FIREBLOCKS_API_KEY             Fireblocks API key
@@ -46,6 +56,11 @@ import { config } from "dotenv";
 config();
 
 const FIGMENT_STAKE_URL = "https://api.figment.io/solana/stake";
+const FIGMENT_BROADCAST_URL = "https://api.figment.io/solana/broadcast";
+const FIGMENT_ACTIVITIES_URL = "https://api.figment.io/solana/activities";
+
+// signOnly PROGRAM_CALL settles on SIGNED, not COMPLETED
+const FB_SIGNED = "SIGNED";
 
 const FIREBLOCKS_API_KEY = process.env.FIREBLOCKS_API_KEY || "";
 const FIGMENT_API_KEY = process.env.API_KEY || "";
@@ -116,52 +131,93 @@ async function createStakeTx(body: Record<string, unknown>) {
   return data?.data ?? data;
 }
 
-async function waitForTxCompletion(
+/**
+ * Wait until Fireblocks finishes vault signing (signOnly → SIGNED).
+ * COMPLETED/CONFIRMED accepted too (workspace/policy variants).
+ */
+async function waitForFireblocksSigned(
   fireblocks: FireblocksSDK,
   fbTx: { id: string }
 ) {
-  let tx: any = await fireblocks.getTransactionById(fbTx.id);
+  const terminalFail = new Set<string>([
+    TransactionStatus.BLOCKED,
+    TransactionStatus.FAILED,
+    TransactionStatus.REJECTED,
+    TransactionStatus.CANCELLED,
+    "DROPPED",
+  ]);
+  const terminalOk = new Set<string>([
+    FB_SIGNED,
+    TransactionStatus.COMPLETED,
+    TransactionStatus.CONFIRMED,
+  ]);
 
-  while (tx.status !== TransactionStatus.COMPLETED) {
-    if (
-      [
-        TransactionStatus.BLOCKED,
-        TransactionStatus.FAILED,
-        TransactionStatus.REJECTED,
-        TransactionStatus.CANCELLED,
-      ].includes(tx.status)
-    ) {
-      console.error("Fireblocks tx failed:", JSON.stringify(tx, null, 2));
+  let current: any = await fireblocks.getTransactionById(fbTx.id);
+  while (!terminalOk.has(current.status)) {
+    if (terminalFail.has(current.status)) {
+      console.error("Fireblocks tx failed:", JSON.stringify(current, null, 2));
       throw new Error(
-        `Fireblocks status: ${tx.status} ${tx.subStatus || ""}`.trim()
+        `Fireblocks status: ${current.status} ${current.subStatus || ""}`.trim()
       );
     }
 
-    console.log("Fireblocks status:", tx.status, tx.subStatus || "");
+    console.log(
+      "Waiting for Fireblocks sign:",
+      current.status,
+      current.subStatus || ""
+    );
     await new Promise((r) => setTimeout(r, 4000));
-    tx = await fireblocks.getTransactionById(fbTx.id);
+    current = await fireblocks.getTransactionById(fbTx.id);
   }
 
   return fireblocks.getTransactionById(fbTx.id);
 }
 
 /**
- * Sign vault remaining slots and broadcast via Fireblocks PROGRAM_CALL.
- * Accepts Figment unsigned_transaction_serialized (hex); converts to base64 for programCallData.
- * useDurableNonce:false — Figment payload already embeds durable nonce.
+ * Extract base64 signed wire after PROGRAM_CALL + signOnly.
+ * Primary field (docs / multi-vault): signedProgramCallData
  */
-async function signAndBroadcastWithFireblocks(
+function extractSignedProgramCallData(fbTx: any): string {
+  const candidates = [
+    fbTx?.signedProgramCallData,
+    fbTx?.signed_program_call_data,
+    fbTx?.extraParameters?.signedProgramCallData,
+    fbTx?.extraParameters?.signed_program_call_data,
+    // Some workspaces return the updated payload in the same field
+    fbTx?.extraParameters?.programCallData,
+  ].filter((v) => typeof v === "string" && v.length > 0);
+
+  if (!candidates.length) {
+    console.error(
+      "Could not find signedProgramCallData. Full Fireblocks tx response:"
+    );
+    console.error(JSON.stringify(fbTx, null, 2));
+    throw new Error(
+      "Expected signedProgramCallData after SIGNED status (see Fireblocks response dump above)"
+    );
+  }
+
+  return String(candidates[0]).replace(/\s/g, "");
+}
+
+/**
+ * Fireblocks PROGRAM_CALL with signOnly — vault signs only, Figment broadcasts.
+ * Accepts Figment unsigned_transaction_serialized (hex); converts to base64 for programCallData.
+ * useDurableNonce:false — Figment payload already embeds AdvanceNonce.
+ * Docs: https://developers.fireblocks.com/reference/interact-with-solana-programs
+ */
+async function signWithFireblocks(
   fireblocks: FireblocksSDK,
   unsignedHex: string,
   note: string
-) {
+): Promise<string> {
   const programCallData = unsignedHexToProgramCallBase64(unsignedHex);
   console.log("\nprogramCallData (base64) length:", programCallData.length);
   console.log(
-    "\nSubmitting Fireblocks PROGRAM_CALL (useDurableNonce=false)..."
+    "\nSubmitting Fireblocks PROGRAM_CALL (signOnly=true, useDurableNonce=false)..."
   );
 
-  const fbTx = await fireblocks.createTransaction({
+  const created = await fireblocks.createTransaction({
     assetId: FIREBLOCKS_ASSET_ID,
     operation: "PROGRAM_CALL" as TransactionOperation,
     source: {
@@ -172,11 +228,153 @@ async function signAndBroadcastWithFireblocks(
     extraParameters: {
       programCallData,
       useDurableNonce: false,
+      signOnly: true,
     },
   });
 
-  console.log("Fireblocks tx id:", fbTx.id);
-  return waitForTxCompletion(fireblocks, fbTx);
+  console.log("Fireblocks signOnly PROGRAM_CALL created:", created.id);
+  const signedTx = await waitForFireblocksSigned(fireblocks, created);
+  console.log(
+    "Fireblocks sign status:",
+    signedTx.status,
+    signedTx.subStatus || ""
+  );
+
+  return extractSignedProgramCallData(signedTx);
+}
+
+/**
+ * Every signature slot must be filled before Figment sees the payload —
+ * an under-signed tx comes back as an opaque 400.
+ */
+function verifySignedTx(signedBase64: string): Transaction {
+  const tx = Transaction.from(Buffer.from(signedBase64, "base64"));
+
+  console.log("\nSigners after Fireblocks:");
+  const missing: string[] = [];
+  tx.signatures.forEach((s, i) => {
+    console.log(
+      `  ${i + 1}. ${s.publicKey.toBase58()} → ${
+        s.signature ? "Signed" : "MISSING"
+      }`
+    );
+    if (!s.signature) missing.push(s.publicKey.toBase58());
+  });
+
+  if (missing.length) {
+    throw new Error(`Missing signature(s): ${missing.join(", ")}`);
+  }
+  return tx;
+}
+
+async function simulateSignedTx(
+  connection: Connection,
+  tx: Transaction
+): Promise<void> {
+  const sim = await connection.simulateTransaction(tx);
+  console.log("\n--- simulateTransaction ---");
+  console.log("err:          ", sim.value.err);
+  console.log("unitsConsumed:", sim.value.unitsConsumed);
+  if (sim.value.logs?.length) {
+    console.log("logs (last 20):");
+    sim.value.logs.slice(-20).forEach((l) => console.log(" ", l));
+  }
+  if (sim.value.err) {
+    throw new Error(
+      `Simulation failed: ${JSON.stringify(sim.value.err)} — not broadcasting`
+    );
+  }
+}
+
+/**
+ * Figment Broadcast. transaction_payload is hex-encoded wire format.
+ * Docs: https://docs.figment.io/reference/solana-broadcast
+ */
+async function broadcast(transaction_payload: string) {
+  const { data } = await axios.post(
+    FIGMENT_BROADCAST_URL,
+    { network: NETWORK, transaction_payload },
+    {
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "x-api-key": FIGMENT_API_KEY,
+      },
+    }
+  );
+  return data?.data ?? data;
+}
+
+/**
+ * Figment Get Solana Activity (UUID or tx hash).
+ * Docs: https://docs.figment.io/reference/get-solana-activity
+ */
+async function getActivityByTxHash(txHash: string) {
+  const { data } = await axios.get(`${FIGMENT_ACTIVITIES_URL}/${txHash}`, {
+    params: { network: NETWORK },
+    headers: {
+      Accept: "application/json",
+      "x-api-key": FIGMENT_API_KEY,
+    },
+  });
+  return data?.data ?? data;
+}
+
+function explorerUrl(txHash: string): string {
+  const clusterQs = NETWORK === "mainnet" ? "" : `?cluster=${NETWORK}`;
+  return `https://explorer.solana.com/tx/${txHash}${clusterQs}`;
+}
+
+async function broadcastAndWaitForCompletion(
+  transactionPayload: string,
+  maxRetries = 30,
+  retryDelay = 2000
+) {
+  console.log("\nBroadcasting via Figment...");
+  const broadcastResult = await broadcast(transactionPayload);
+  const txHash = broadcastResult.transaction_hash || broadcastResult.tx_hash;
+  if (!txHash) {
+    console.error(JSON.stringify(broadcastResult, null, 2));
+    throw new Error("No transaction_hash from broadcast");
+  }
+
+  console.log("Tx hash: ", txHash);
+  console.log("Explorer:", explorerUrl(txHash));
+
+  for (let attempts = 1; attempts <= maxRetries; attempts++) {
+    try {
+      const activity = await getActivityByTxHash(txHash);
+      // activity-life: pending | complete | failed
+      // on-chain tx:   in_progress | confirmed | failed | expired
+      const activityStatus = activity?.status;
+      const txStatus = activity?.tx?.status;
+
+      console.log(
+        `Status (${attempts}/${maxRetries}): activity=${activityStatus} tx=${txStatus}`
+      );
+
+      if (txStatus === "confirmed") {
+        console.log("On-chain tx confirmed.");
+        return { txHash, status: activity, success: true };
+      }
+      if (txStatus === "failed" || txStatus === "expired") {
+        console.log("On-chain tx failed/expired.");
+        return { txHash, status: activity, success: false };
+      }
+      if (activityStatus === "failed") {
+        return { txHash, status: activity, success: false };
+      }
+    } catch (e: any) {
+      // Activity may not be indexed immediately after broadcast
+      console.log(
+        `Status check failed (${attempts}/${maxRetries}):`,
+        e?.response?.data || e.message
+      );
+    }
+    await new Promise((r) => setTimeout(r, retryDelay));
+  }
+
+  return { txHash, status: { status: "timeout" }, success: false };
 }
 
 /**
@@ -406,27 +604,31 @@ async function main() {
     );
   });
 
-  const completed = await signAndBroadcastWithFireblocks(
+  const signedBase64 = await signWithFireblocks(
     fireblocks,
     hex,
     `Figment durable-nonce stake stake_account=${stake.stake_account || "?"} amount=${AMOUNT_SOL}`
   );
 
-  console.log("\n--- Fireblocks result ---");
-  console.log("id:      ", completed.id);
-  console.log("status:  ", completed.status);
-  console.log("subStatus:", completed.subStatus);
-  console.log("txHash:  ", completed.txHash);
+  const signedTx = verifySignedTx(signedBase64);
+  await simulateSignedTx(connection, signedTx);
 
-  if (completed.txHash) {
-    const clusterQs =
-      NETWORK === "mainnet"
-        ? ""
-        : "?cluster=devnet";
-    console.log(
-      "Explorer:",
-      `https://explorer.solana.com/tx/${completed.txHash}${clusterQs}`
-    );
+  // Fireblocks hands back base64; Figment /solana/broadcast expects hex
+  const signedBuffer = Buffer.from(signedBase64, "base64");
+  const transactionPayloadHex = signedBuffer.toString("hex");
+  console.log("\nsigned tx bytes:        ", signedBuffer.length);
+  console.log("transaction_payload hex:", transactionPayloadHex.length, "chars");
+
+  const result = await broadcastAndWaitForCompletion(transactionPayloadHex);
+
+  console.log("\n--- Figment broadcast result ---");
+  console.log("txHash:  ", result.txHash);
+  console.log("success: ", result.success);
+  console.log("activity:", JSON.stringify(result.status, null, 2));
+  console.log("Explorer:", explorerUrl(result.txHash));
+
+  if (!result.success) {
+    throw new Error("Transaction did not confirm — see activity status above");
   }
 }
 
