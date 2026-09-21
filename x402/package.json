@@ -1,0 +1,23 @@
+{
+  "name": "figment-x402",
+  "private": true,
+  "scripts": {
+    "register": "tsx register_merchant.ts",
+    "merchant": "tsx merchant_server.ts"
+  },
+  "dependencies": {
+    "@solana/kit": "^5.5.1",
+    "@x402/core": "^2.26.0",
+    "@x402/express": "^2.26.0",
+    "@x402/svm": "^2.26.0",
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.7",
+    "express": "^4.22.3"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.25",
+    "@types/node": "^22.13.4",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.3"
+  }
+}
