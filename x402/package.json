@@ -3,12 +3,15 @@
   "private": true,
   "scripts": {
     "register": "tsx register_merchant.ts",
-    "merchant": "tsx merchant_server.ts"
+    "merchant": "tsx merchant_server.ts",
+    "pay": "tsx pay_client.ts"
   },
   "dependencies": {
+    "@scure/base": "^2.4.0",
     "@solana/kit": "^5.5.1",
     "@x402/core": "^2.26.0",
     "@x402/express": "^2.26.0",
+    "@x402/fetch": "^2.26.0",
     "@x402/svm": "^2.26.0",
     "axios": "^1.7.9",
     "dotenv": "^16.4.7",
